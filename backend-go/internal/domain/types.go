@@ -136,5 +136,7 @@ type GameSummary struct {
 	CurrentWord     *CalledWord
 	Claims          []BingoClaim
 	Winners         []Winner
+	Players         []Player
+	CalledWords     []CalledWord
 	Status          string
 }
