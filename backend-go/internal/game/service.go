@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/rand"
@@ -31,6 +32,7 @@ type Store interface {
 	UpsertUserFromPrincipal(context.Context, auth.Principal) (domain.User, error)
 	CreateGameRun(context.Context, db.CreateGameRunParams) (domain.GameRun, error)
 	GetGameRun(context.Context, string) (domain.GameRun, error)
+	UpdateGameRunStatus(context.Context, string, string, *time.Time, *time.Time) (domain.GameRun, error)
 	CountAllowedPlayers(context.Context, string) (int, error)
 	AddAllowedPlayer(context.Context, db.AddAllowedPlayerParams) (domain.AllowedPlayer, error)
 	ListAllowedPlayers(context.Context, string) ([]domain.AllowedPlayer, error)
@@ -38,8 +40,19 @@ type Store interface {
 	CreatePlayer(context.Context, db.CreatePlayerParams) (domain.Player, error)
 	GetPlayerByGameRunAndEmail(context.Context, string, string) (domain.Player, error)
 	ListWordSetWords(context.Context, string) ([]domain.WordSetWord, error)
+	CreateCalledWord(context.Context, db.CreateCalledWordParams) (domain.CalledWord, error)
+	ListCalledWords(context.Context, string) ([]domain.CalledWord, error)
 	CreateCard(context.Context, db.CreateCardParams) (domain.BingoCard, error)
 	GetPlayerCard(context.Context, string) (domain.BingoCard, error)
+	SetCardCellMarked(context.Context, db.SetCardCellMarkedParams) (domain.BingoCardCell, error)
+	CreateBingoClaim(context.Context, db.CreateBingoClaimParams) (domain.BingoClaim, error)
+	UpdateBingoClaimValidation(context.Context, db.UpdateBingoClaimValidationParams) (domain.BingoClaim, error)
+	GetBingoClaim(context.Context, string) (domain.BingoClaim, error)
+	ListBingoClaims(context.Context, string) ([]domain.BingoClaim, error)
+	CreateWinner(context.Context, db.CreateWinnerParams) (domain.Winner, error)
+	ListWinners(context.Context, string) ([]domain.Winner, error)
+	CountWinners(context.Context, string) (int, error)
+	CountPlayers(context.Context, string) (int, error)
 	RecordAuditEvent(context.Context, audit.Event) error
 }
 
@@ -149,6 +162,119 @@ func (s *Service) GetGameRun(ctx context.Context, gameRunID string) (GameRunWith
 	}
 
 	return GameRunWithCounts{GameRun: run, AllowedPlayerCount: count}, nil
+}
+
+func (s *Service) StartGame(ctx context.Context, principal auth.Principal, gameRunID string) (GameRunWithCounts, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return GameRunWithCounts{}, ErrForbidden
+	}
+
+	user, err := s.store.UpsertUserFromPrincipal(ctx, principal)
+	if err != nil {
+		return GameRunWithCounts{}, err
+	}
+
+	run, err := s.store.GetGameRun(ctx, gameRunID)
+	if err != nil {
+		return GameRunWithCounts{}, mapStoreError(err)
+	}
+
+	switch run.Status {
+	case "live":
+		count, err := s.store.CountAllowedPlayers(ctx, gameRunID)
+		if err != nil {
+			return GameRunWithCounts{}, err
+		}
+		return GameRunWithCounts{GameRun: run, AllowedPlayerCount: count}, nil
+	case "draft", "scheduled", "invites_sent", "lobby_open":
+	default:
+		return GameRunWithCounts{}, fmt.Errorf("%w: game cannot start from status %s", ErrConflict, run.Status)
+	}
+
+	startedAt := s.clock.Now()
+	run, err = s.store.UpdateGameRunStatus(ctx, gameRunID, "live", &startedAt, nil)
+	if err != nil {
+		return GameRunWithCounts{}, mapStoreError(err)
+	}
+
+	s.emit(ctx, events.Event{Type: "game.started", EntityID: run.ID, Payload: map[string]any{"status": run.Status}})
+	s.recordAudit(ctx, audit.Event{GameRunID: &run.ID, ActorUserID: &user.ID, EventType: "game.started", EntityType: "game_run", EntityID: &run.ID, Payload: map[string]any{"status": run.Status}})
+
+	count, err := s.store.CountAllowedPlayers(ctx, gameRunID)
+	if err != nil {
+		return GameRunWithCounts{}, err
+	}
+
+	return GameRunWithCounts{GameRun: run, AllowedPlayerCount: count}, nil
+}
+
+func (s *Service) CallNextWord(ctx context.Context, principal auth.Principal, gameRunID string) (domain.CalledWord, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return domain.CalledWord{}, ErrForbidden
+	}
+
+	user, err := s.store.UpsertUserFromPrincipal(ctx, principal)
+	if err != nil {
+		return domain.CalledWord{}, err
+	}
+
+	run, err := s.store.GetGameRun(ctx, gameRunID)
+	if err != nil {
+		return domain.CalledWord{}, mapStoreError(err)
+	}
+	if run.Status != "live" {
+		return domain.CalledWord{}, fmt.Errorf("%w: game must be live to call words", ErrConflict)
+	}
+	if run.WordSetID == nil {
+		return domain.CalledWord{}, fmt.Errorf("%w: game has no word set", ErrValidation)
+	}
+
+	words, err := s.store.ListWordSetWords(ctx, *run.WordSetID)
+	if err != nil {
+		return domain.CalledWord{}, err
+	}
+	calledWords, err := s.store.ListCalledWords(ctx, gameRunID)
+	if err != nil {
+		return domain.CalledWord{}, err
+	}
+
+	called := make(map[string]struct{}, len(calledWords))
+	for _, word := range calledWords {
+		called[strings.ToLower(word.Word)] = struct{}{}
+	}
+
+	for _, word := range words {
+		if _, ok := called[strings.ToLower(word.Word)]; ok {
+			continue
+		}
+
+		calledWord, err := s.store.CreateCalledWord(ctx, db.CreateCalledWordParams{
+			GameRunID:      gameRunID,
+			WordSetWordID:  &word.ID,
+			Word:           word.Word,
+			CalledByUserID: &user.ID,
+		})
+		if err != nil {
+			if errors.Is(err, db.ErrConflict) {
+				return domain.CalledWord{}, fmt.Errorf("%w: word was already called", ErrConflict)
+			}
+			return domain.CalledWord{}, err
+		}
+
+		s.emit(ctx, events.Event{Type: "word.called", EntityID: calledWord.ID, Payload: map[string]any{"gameRunId": gameRunID, "word": calledWord.Word, "sequence": calledWord.Sequence}})
+		s.recordAudit(ctx, audit.Event{GameRunID: &gameRunID, ActorUserID: &user.ID, EventType: "word.called", EntityType: "called_word", EntityID: &calledWord.ID, Payload: map[string]any{"word": calledWord.Word, "sequence": calledWord.Sequence}})
+		return calledWord, nil
+	}
+
+	return domain.CalledWord{}, fmt.Errorf("%w: no uncalled words remain", ErrConflict)
+}
+
+func (s *Service) ListCalledWords(ctx context.Context, gameRunID string) ([]domain.CalledWord, error) {
+	if _, err := s.store.GetGameRun(ctx, gameRunID); err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	return s.store.ListCalledWords(ctx, gameRunID)
 }
 
 type AddAllowedPlayerInput struct {
@@ -310,6 +436,217 @@ func (s *Service) GetPlayerCard(ctx context.Context, gameRunID, playerID string)
 	return card, nil
 }
 
+type MarkCardCellInput struct {
+	GameRunID string
+	PlayerID  string
+	CellID    string
+	Marked    bool
+}
+
+func (s *Service) MarkCardCell(ctx context.Context, input MarkCardCellInput) (domain.BingoCardCell, error) {
+	if _, err := s.store.GetGameRun(ctx, input.GameRunID); err != nil {
+		return domain.BingoCardCell{}, mapStoreError(err)
+	}
+
+	cell, err := s.store.SetCardCellMarked(ctx, db.SetCardCellMarkedParams{
+		GameRunID: input.GameRunID,
+		PlayerID:  input.PlayerID,
+		CellID:    input.CellID,
+		Marked:    input.Marked,
+	})
+	if err != nil {
+		return domain.BingoCardCell{}, mapStoreError(err)
+	}
+
+	s.emit(ctx, events.Event{Type: "card.cell_marked", EntityID: cell.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "playerId": input.PlayerID, "marked": input.Marked}})
+	return cell, nil
+}
+
+type SubmitBingoClaimInput struct {
+	GameRunID string
+	PlayerID  string
+	Pattern   string
+}
+
+type BingoClaimResult struct {
+	Claim  domain.BingoClaim
+	Winner *domain.Winner
+}
+
+type claimValidationResult struct {
+	Valid        bool                  `json:"valid"`
+	MatchedCells []claimValidationCell `json:"matchedCells"`
+	MissingCells []claimValidationCell `json:"missingCells"`
+	Reason       string                `json:"reason"`
+	Pattern      string                `json:"pattern"`
+}
+
+type claimValidationCell struct {
+	ID          string `json:"id"`
+	RowIndex    int    `json:"rowIndex"`
+	ColIndex    int    `json:"colIndex"`
+	Word        string `json:"word"`
+	IsFreeSpace bool   `json:"isFreeSpace"`
+}
+
+func (s *Service) SubmitBingoClaim(ctx context.Context, input SubmitBingoClaimInput) (BingoClaimResult, error) {
+	pattern := strings.TrimSpace(input.Pattern)
+	if pattern == "" {
+		pattern = "single_line"
+	}
+	if pattern != "single_line" {
+		return BingoClaimResult{}, fmt.Errorf("%w: unsupported claim pattern %s", ErrValidation, pattern)
+	}
+
+	run, err := s.store.GetGameRun(ctx, input.GameRunID)
+	if err != nil {
+		return BingoClaimResult{}, mapStoreError(err)
+	}
+	if run.Status != "live" {
+		return BingoClaimResult{}, fmt.Errorf("%w: game must be live to submit a claim", ErrConflict)
+	}
+
+	card, err := s.store.GetPlayerCard(ctx, input.PlayerID)
+	if err != nil {
+		return BingoClaimResult{}, mapStoreError(err)
+	}
+	if card.GameRunID != input.GameRunID {
+		return BingoClaimResult{}, ErrNotFound
+	}
+
+	claim, err := s.store.CreateBingoClaim(ctx, db.CreateBingoClaimParams{
+		GameRunID: input.GameRunID,
+		PlayerID:  input.PlayerID,
+		Pattern:   pattern,
+		Status:    "pending",
+	})
+	if err != nil {
+		return BingoClaimResult{}, err
+	}
+
+	s.emit(ctx, events.Event{Type: "claim.submitted", EntityID: claim.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "playerId": input.PlayerID, "pattern": pattern}})
+	s.recordAudit(ctx, audit.Event{GameRunID: &input.GameRunID, EventType: "claim.submitted", EntityType: "bingo_claim", EntityID: &claim.ID, Payload: map[string]any{"playerId": input.PlayerID, "pattern": pattern}})
+
+	calledWords, err := s.store.ListCalledWords(ctx, input.GameRunID)
+	if err != nil {
+		return BingoClaimResult{}, err
+	}
+
+	validation := validateSingleLineClaim(card, calledWords, pattern)
+	validationJSON, err := json.Marshal(validation)
+	if err != nil {
+		return BingoClaimResult{}, fmt.Errorf("marshal claim validation: %w", err)
+	}
+
+	status := "invalid"
+	if validation.Valid {
+		status = "confirmed"
+	}
+	now := s.clock.Now()
+	claim, err = s.store.UpdateBingoClaimValidation(ctx, db.UpdateBingoClaimValidationParams{
+		ClaimID:          claim.ID,
+		Status:           status,
+		ValidationResult: validationJSON,
+		ReviewedAt:       &now,
+	})
+	if err != nil {
+		return BingoClaimResult{}, err
+	}
+
+	result := BingoClaimResult{Claim: claim}
+	if validation.Valid {
+		winners, err := s.store.ListWinners(ctx, input.GameRunID)
+		if err != nil {
+			return BingoClaimResult{}, err
+		}
+		for _, winner := range winners {
+			if winner.ClaimID != nil && *winner.ClaimID == claim.ID {
+				result.Winner = &winner
+				break
+			}
+		}
+
+		if result.Winner == nil && len(winners) < 3 {
+			placement := len(winners) + 1
+			winner, err := s.store.CreateWinner(ctx, db.CreateWinnerParams{
+				GameRunID: input.GameRunID,
+				PlayerID:  input.PlayerID,
+				ClaimID:   &claim.ID,
+				Placement: placement,
+				Pattern:   pattern,
+			})
+			if err != nil {
+				if !errors.Is(err, db.ErrConflict) {
+					return BingoClaimResult{}, err
+				}
+			} else {
+				result.Winner = &winner
+				s.emit(ctx, events.Event{Type: "winner.created", EntityID: winner.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "playerId": input.PlayerID, "placement": winner.Placement}})
+				s.recordAudit(ctx, audit.Event{GameRunID: &input.GameRunID, EventType: "winner.created", EntityType: "winner", EntityID: &winner.ID, Payload: map[string]any{"playerId": input.PlayerID, "placement": winner.Placement}})
+				if placement == 3 {
+					endedAt := s.clock.Now()
+					if _, err := s.store.UpdateGameRunStatus(ctx, input.GameRunID, "finished", nil, &endedAt); err != nil {
+						return BingoClaimResult{}, err
+					}
+				}
+			}
+		}
+	}
+
+	s.emit(ctx, events.Event{Type: "claim.validated", EntityID: claim.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "status": claim.Status, "valid": validation.Valid}})
+	s.recordAudit(ctx, audit.Event{GameRunID: &input.GameRunID, EventType: "claim.validated", EntityType: "bingo_claim", EntityID: &claim.ID, Payload: map[string]any{"status": claim.Status, "valid": validation.Valid}})
+
+	return result, nil
+}
+
+func (s *Service) ListBingoClaims(ctx context.Context, gameRunID string) ([]domain.BingoClaim, error) {
+	if _, err := s.store.GetGameRun(ctx, gameRunID); err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	return s.store.ListBingoClaims(ctx, gameRunID)
+}
+
+func (s *Service) GetGameSummary(ctx context.Context, gameRunID string) (domain.GameSummary, error) {
+	run, err := s.store.GetGameRun(ctx, gameRunID)
+	if err != nil {
+		return domain.GameSummary{}, mapStoreError(err)
+	}
+
+	playerCount, err := s.store.CountPlayers(ctx, gameRunID)
+	if err != nil {
+		return domain.GameSummary{}, err
+	}
+	calledWords, err := s.store.ListCalledWords(ctx, gameRunID)
+	if err != nil {
+		return domain.GameSummary{}, err
+	}
+	claims, err := s.store.ListBingoClaims(ctx, gameRunID)
+	if err != nil {
+		return domain.GameSummary{}, err
+	}
+	winners, err := s.store.ListWinners(ctx, gameRunID)
+	if err != nil {
+		return domain.GameSummary{}, err
+	}
+
+	var currentWord *domain.CalledWord
+	if len(calledWords) > 0 {
+		word := calledWords[len(calledWords)-1]
+		currentWord = &word
+	}
+
+	return domain.GameSummary{
+		GameRun:         run,
+		PlayerCount:     playerCount,
+		CalledWordCount: len(calledWords),
+		CurrentWord:     currentWord,
+		Claims:          claims,
+		Winners:         winners,
+		Status:          run.Status,
+	}, nil
+}
+
 func (s *Service) Authenticate(r *http.Request) (auth.Principal, error) {
 	return s.authenticator.Authenticate(r)
 }
@@ -345,6 +682,107 @@ func makeCardCells(seed string, words []domain.WordSetWord) []db.CreateCardCellP
 	}
 
 	return cells
+}
+
+func validateSingleLineClaim(card domain.BingoCard, calledWords []domain.CalledWord, pattern string) claimValidationResult {
+	called := make(map[string]struct{}, len(calledWords))
+	for _, word := range calledWords {
+		called[strings.ToLower(word.Word)] = struct{}{}
+	}
+
+	cellsByPosition := make(map[[2]int]domain.BingoCardCell, len(card.Cells))
+	for _, cell := range card.Cells {
+		cellsByPosition[[2]int{cell.RowIndex, cell.ColIndex}] = cell
+	}
+
+	lines := singleLinePositions()
+	best := claimValidationResult{
+		Valid:        false,
+		MatchedCells: []claimValidationCell{},
+		MissingCells: []claimValidationCell{},
+		Reason:       "no_complete_line",
+		Pattern:      pattern,
+	}
+	bestMissingCount := 26
+
+	for _, line := range lines {
+		matched := make([]claimValidationCell, 0, len(line))
+		missing := make([]claimValidationCell, 0)
+
+		for _, position := range line {
+			cell, ok := cellsByPosition[position]
+			if !ok {
+				continue
+			}
+			cellRef := claimCellRef(cell)
+			if cell.IsFreeSpace {
+				matched = append(matched, cellRef)
+				continue
+			}
+			if _, ok := called[strings.ToLower(cell.Word)]; ok {
+				matched = append(matched, cellRef)
+				continue
+			}
+			missing = append(missing, cellRef)
+		}
+
+		if len(missing) == 0 && len(matched) == len(line) {
+			return claimValidationResult{
+				Valid:        true,
+				MatchedCells: matched,
+				MissingCells: []claimValidationCell{},
+				Reason:       "single_line_complete",
+				Pattern:      pattern,
+			}
+		}
+		if len(missing) < bestMissingCount {
+			bestMissingCount = len(missing)
+			best.MatchedCells = matched
+			best.MissingCells = missing
+		}
+	}
+
+	return best
+}
+
+func singleLinePositions() [][][2]int {
+	lines := make([][][2]int, 0, 12)
+
+	for row := 0; row < 5; row++ {
+		line := make([][2]int, 0, 5)
+		for col := 0; col < 5; col++ {
+			line = append(line, [2]int{row, col})
+		}
+		lines = append(lines, line)
+	}
+
+	for col := 0; col < 5; col++ {
+		line := make([][2]int, 0, 5)
+		for row := 0; row < 5; row++ {
+			line = append(line, [2]int{row, col})
+		}
+		lines = append(lines, line)
+	}
+
+	firstDiagonal := make([][2]int, 0, 5)
+	secondDiagonal := make([][2]int, 0, 5)
+	for index := 0; index < 5; index++ {
+		firstDiagonal = append(firstDiagonal, [2]int{index, index})
+		secondDiagonal = append(secondDiagonal, [2]int{index, 4 - index})
+	}
+	lines = append(lines, firstDiagonal, secondDiagonal)
+
+	return lines
+}
+
+func claimCellRef(cell domain.BingoCardCell) claimValidationCell {
+	return claimValidationCell{
+		ID:          cell.ID,
+		RowIndex:    cell.RowIndex,
+		ColIndex:    cell.ColIndex,
+		Word:        cell.Word,
+		IsFreeSpace: cell.IsFreeSpace,
+	}
 }
 
 func seedInt64(seed string) int64 {
