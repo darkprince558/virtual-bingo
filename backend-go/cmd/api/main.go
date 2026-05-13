@@ -12,6 +12,7 @@ import (
 
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/app"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/config"
+	"github.com/darkprince558/virtual-bingo/backend-go/internal/db"
 )
 
 func main() {
@@ -23,10 +24,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	server := app.NewServer(cfg, logger)
-
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	var pool *db.Pool
+	if cfg.DatabaseURL != "" {
+		pool, err = db.Open(ctx, cfg.DatabaseURL)
+		if err != nil {
+			logger.Error("failed to connect to database", "error", err)
+			os.Exit(1)
+		}
+		defer pool.Close()
+	}
+
+	server := app.NewServer(cfg, logger, pool)
 
 	go func() {
 		logger.Info("starting virtual bingo api", "addr", cfg.Addr(), "env", cfg.AppEnv)

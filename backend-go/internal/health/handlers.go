@@ -1,17 +1,26 @@
 package health
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
 )
 
-type Handler struct {
-	startedAt time.Time
+type Pinger interface {
+	Ping(context.Context) error
 }
 
-func NewHandler() Handler {
-	return Handler{startedAt: time.Now().UTC()}
+type Handler struct {
+	startedAt time.Time
+	database  Pinger
+}
+
+func NewHandler(database Pinger) Handler {
+	return Handler{
+		startedAt: time.Now().UTC(),
+		database:  database,
+	}
 }
 
 func (h Handler) Healthz(w http.ResponseWriter, r *http.Request) {
@@ -21,9 +30,30 @@ func (h Handler) Healthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) Readyz(w http.ResponseWriter, r *http.Request) {
+	if h.database == nil {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":     "ready",
+			"database":   "not_configured",
+			"started_at": h.startedAt.Format(time.RFC3339),
+		})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+
+	if err := h.database.Ping(ctx); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"status":     "not_ready",
+			"database":   "unavailable",
+			"started_at": h.startedAt.Format(time.RFC3339),
+		})
+		return
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status":     "ready",
-		"database":   "not_configured",
+		"database":   "ready",
 		"started_at": h.startedAt.Format(time.RFC3339),
 	})
 }

@@ -11,7 +11,7 @@ const apiVersion = "v0.1.0"
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
-	healthHandler := health.NewHandler()
+	healthHandler := health.NewHandler(s.database)
 
 	mux.HandleFunc("/healthz", getOnly(healthHandler.Healthz))
 	mux.HandleFunc("/readyz", getOnly(healthHandler.Readyz))

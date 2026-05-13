@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -8,19 +9,25 @@ import (
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/config"
 )
 
-type Server struct {
-	cfg    config.Config
-	logger *slog.Logger
+type databasePinger interface {
+	Ping(context.Context) error
 }
 
-func NewServer(cfg config.Config, logger *slog.Logger) *http.Server {
+type Server struct {
+	cfg      config.Config
+	logger   *slog.Logger
+	database databasePinger
+}
+
+func NewServer(cfg config.Config, logger *slog.Logger, database databasePinger) *http.Server {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	appServer := &Server{
-		cfg:    cfg,
-		logger: logger,
+		cfg:      cfg,
+		logger:   logger,
+		database: database,
 	}
 
 	return &http.Server{

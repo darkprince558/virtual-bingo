@@ -1,0 +1,367 @@
+package db
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"fmt"
+	"time"
+
+	"github.com/darkprince558/virtual-bingo/backend-go/internal/domain"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+var ErrNotFound = errors.New("not found")
+
+type Store struct {
+	pool *pgxpool.Pool
+}
+
+func NewStore(pool *pgxpool.Pool) *Store {
+	return &Store{pool: pool}
+}
+
+type CreateGameRunParams struct {
+	TemplateID       *string
+	HostUserID       string
+	WordSetID        *string
+	Code             string
+	Name             string
+	Status           string
+	ScheduledStartAt *time.Time
+	WinningPattern   *string
+}
+
+func (s *Store) CreateGameRun(ctx context.Context, params CreateGameRunParams) (domain.GameRun, error) {
+	status := params.Status
+	if status == "" {
+		status = "draft"
+	}
+
+	row := s.pool.QueryRow(ctx, `
+		INSERT INTO game_runs (
+			template_id,
+			host_user_id,
+			word_set_id,
+			code,
+			name,
+			status,
+			scheduled_start_at,
+			winning_pattern
+		)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id::text, template_id::text, host_user_id::text, word_set_id::text, code, name, status, scheduled_start_at, started_at, ended_at, winning_pattern, created_at, updated_at
+	`, params.TemplateID, params.HostUserID, params.WordSetID, params.Code, params.Name, status, params.ScheduledStartAt, params.WinningPattern)
+
+	return scanGameRun(row)
+}
+
+func (s *Store) GetGameRun(ctx context.Context, id string) (domain.GameRun, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id::text, template_id::text, host_user_id::text, word_set_id::text, code, name, status, scheduled_start_at, started_at, ended_at, winning_pattern, created_at, updated_at
+		FROM game_runs
+		WHERE id = $1
+	`, id)
+
+	return scanGameRun(row)
+}
+
+type AddAllowedPlayerParams struct {
+	GameRunID   string
+	Email       string
+	DisplayName string
+	Source      string
+}
+
+func (s *Store) AddAllowedPlayer(ctx context.Context, params AddAllowedPlayerParams) (domain.AllowedPlayer, error) {
+	source := params.Source
+	if source == "" {
+		source = "manual"
+	}
+
+	row := s.pool.QueryRow(ctx, `
+		INSERT INTO allowed_players (game_run_id, email, display_name, source)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id::text, game_run_id::text, email, display_name, source, created_at
+	`, params.GameRunID, params.Email, params.DisplayName, source)
+
+	return scanAllowedPlayer(row)
+}
+
+func (s *Store) ListAllowedPlayers(ctx context.Context, gameRunID string) ([]domain.AllowedPlayer, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, game_run_id::text, email, display_name, source, created_at
+		FROM allowed_players
+		WHERE game_run_id = $1
+		ORDER BY created_at, id
+	`, gameRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	players := make([]domain.AllowedPlayer, 0)
+	for rows.Next() {
+		player, err := scanAllowedPlayer(rows)
+		if err != nil {
+			return nil, err
+		}
+		players = append(players, player)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return players, nil
+}
+
+type CreatePlayerParams struct {
+	GameRunID       string
+	UserID          *string
+	Email           string
+	DisplayName     string
+	ConnectionState string
+	State           string
+}
+
+func (s *Store) CreatePlayer(ctx context.Context, params CreatePlayerParams) (domain.Player, error) {
+	connectionState := params.ConnectionState
+	if connectionState == "" {
+		connectionState = "offline"
+	}
+	state := params.State
+	if state == "" {
+		state = "joined"
+	}
+
+	row := s.pool.QueryRow(ctx, `
+		INSERT INTO players (game_run_id, user_id, email, display_name, connection_state, state)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		RETURNING id::text, game_run_id::text, user_id::text, email, display_name, connection_state, state, joined_at, last_seen_at, created_at, updated_at
+	`, params.GameRunID, params.UserID, params.Email, params.DisplayName, connectionState, state)
+
+	return scanPlayer(row)
+}
+
+type CreateCardParams struct {
+	GameRunID string
+	PlayerID  string
+	Seed      string
+	Cells     []CreateCardCellParams
+}
+
+type CreateCardCellParams struct {
+	RowIndex    int
+	ColIndex    int
+	Word        string
+	IsFreeSpace bool
+	MarkedAt    *time.Time
+}
+
+func (s *Store) CreateCard(ctx context.Context, params CreateCardParams) (domain.BingoCard, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.BingoCard{}, err
+	}
+	defer tx.Rollback(ctx)
+
+	cardRow := tx.QueryRow(ctx, `
+		INSERT INTO bingo_cards (game_run_id, player_id, seed)
+		VALUES ($1, $2, $3)
+		RETURNING id::text, game_run_id::text, player_id::text, seed, created_at
+	`, params.GameRunID, params.PlayerID, params.Seed)
+
+	card, err := scanBingoCard(cardRow)
+	if err != nil {
+		return domain.BingoCard{}, err
+	}
+
+	card.Cells = make([]domain.BingoCardCell, 0, len(params.Cells))
+	for _, cell := range params.Cells {
+		cellRow := tx.QueryRow(ctx, `
+			INSERT INTO bingo_card_cells (card_id, row_index, col_index, word, is_free_space, marked_at)
+			VALUES ($1, $2, $3, $4, $5, $6)
+			RETURNING id::text, card_id::text, row_index, col_index, word, is_free_space, marked_at, created_at
+		`, card.ID, cell.RowIndex, cell.ColIndex, cell.Word, cell.IsFreeSpace, cell.MarkedAt)
+
+		createdCell, err := scanBingoCardCell(cellRow)
+		if err != nil {
+			return domain.BingoCard{}, err
+		}
+		card.Cells = append(card.Cells, createdCell)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.BingoCard{}, err
+	}
+
+	return card, nil
+}
+
+func (s *Store) GetPlayerCard(ctx context.Context, playerID string) (domain.BingoCard, error) {
+	cardRow := s.pool.QueryRow(ctx, `
+		SELECT id::text, game_run_id::text, player_id::text, seed, created_at
+		FROM bingo_cards
+		WHERE player_id = $1
+	`, playerID)
+
+	card, err := scanBingoCard(cardRow)
+	if err != nil {
+		return domain.BingoCard{}, err
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, card_id::text, row_index, col_index, word, is_free_space, marked_at, created_at
+		FROM bingo_card_cells
+		WHERE card_id = $1
+		ORDER BY row_index, col_index
+	`, card.ID)
+	if err != nil {
+		return domain.BingoCard{}, err
+	}
+	defer rows.Close()
+
+	card.Cells = make([]domain.BingoCardCell, 0)
+	for rows.Next() {
+		cell, err := scanBingoCardCell(rows)
+		if err != nil {
+			return domain.BingoCard{}, err
+		}
+		card.Cells = append(card.Cells, cell)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.BingoCard{}, err
+	}
+
+	return card, nil
+}
+
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func scanGameRun(row scanner) (domain.GameRun, error) {
+	var run domain.GameRun
+	var templateID, wordSetID, winningPattern sql.NullString
+	var scheduledStartAt, startedAt, endedAt sql.NullTime
+
+	err := row.Scan(
+		&run.ID,
+		&templateID,
+		&run.HostUserID,
+		&wordSetID,
+		&run.Code,
+		&run.Name,
+		&run.Status,
+		&scheduledStartAt,
+		&startedAt,
+		&endedAt,
+		&winningPattern,
+		&run.CreatedAt,
+		&run.UpdatedAt,
+	)
+	if err != nil {
+		return domain.GameRun{}, mapError(err)
+	}
+
+	run.TemplateID = nullableStringPtr(templateID)
+	run.WordSetID = nullableStringPtr(wordSetID)
+	run.ScheduledStartAt = nullableTimePtr(scheduledStartAt)
+	run.StartedAt = nullableTimePtr(startedAt)
+	run.EndedAt = nullableTimePtr(endedAt)
+	run.WinningPattern = nullableStringPtr(winningPattern)
+
+	return run, nil
+}
+
+func scanAllowedPlayer(row scanner) (domain.AllowedPlayer, error) {
+	var player domain.AllowedPlayer
+	err := row.Scan(&player.ID, &player.GameRunID, &player.Email, &player.DisplayName, &player.Source, &player.CreatedAt)
+	if err != nil {
+		return domain.AllowedPlayer{}, mapError(err)
+	}
+
+	return player, nil
+}
+
+func scanPlayer(row scanner) (domain.Player, error) {
+	var player domain.Player
+	var userID sql.NullString
+
+	err := row.Scan(
+		&player.ID,
+		&player.GameRunID,
+		&userID,
+		&player.Email,
+		&player.DisplayName,
+		&player.ConnectionState,
+		&player.State,
+		&player.JoinedAt,
+		&player.LastSeenAt,
+		&player.CreatedAt,
+		&player.UpdatedAt,
+	)
+	if err != nil {
+		return domain.Player{}, mapError(err)
+	}
+
+	player.UserID = nullableStringPtr(userID)
+	return player, nil
+}
+
+func scanBingoCard(row scanner) (domain.BingoCard, error) {
+	var card domain.BingoCard
+	err := row.Scan(&card.ID, &card.GameRunID, &card.PlayerID, &card.Seed, &card.CreatedAt)
+	if err != nil {
+		return domain.BingoCard{}, mapError(err)
+	}
+
+	return card, nil
+}
+
+func scanBingoCardCell(row scanner) (domain.BingoCardCell, error) {
+	var cell domain.BingoCardCell
+	var markedAt sql.NullTime
+
+	err := row.Scan(
+		&cell.ID,
+		&cell.CardID,
+		&cell.RowIndex,
+		&cell.ColIndex,
+		&cell.Word,
+		&cell.IsFreeSpace,
+		&markedAt,
+		&cell.CreatedAt,
+	)
+	if err != nil {
+		return domain.BingoCardCell{}, mapError(err)
+	}
+
+	cell.MarkedAt = nullableTimePtr(markedAt)
+	return cell, nil
+}
+
+func nullableStringPtr(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+
+	return &value.String
+}
+
+func nullableTimePtr(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+
+	return &value.Time
+}
+
+func mapError(err error) error {
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+
+	return fmt.Errorf("database query: %w", err)
+}
