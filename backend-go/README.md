@@ -1,6 +1,6 @@
 # Virtual Bingo Go Backend
 
-This is the production backend foundation for the autonomous Virtual Bingo platform. It currently has typed environment config, health/readiness endpoints, a version endpoint, Postgres migrations, local seed data, a store layer, and the first MVP API flow for game runs, allowed players, player join, and persisted cards.
+This is the production backend foundation for the autonomous Virtual Bingo platform. It currently has typed environment config, health/readiness endpoints, a version endpoint, Postgres migrations, local seed data, a store layer, and the MVP API flow for game runs, allowed players, player join, persisted cards, game start, called words, marks, claims, winners, and summary state.
 
 ## Local Setup
 
@@ -26,11 +26,18 @@ The API listens on `http://localhost:8080` by default.
 - `GET /api/v1/version`
 - `POST /api/v1/games`
 - `GET /api/v1/games/{gameID}`
+- `POST /api/v1/games/{gameID}/start`
+- `POST /api/v1/games/{gameID}/calls`
+- `GET /api/v1/games/{gameID}/calls`
 - `POST /api/v1/games/{gameID}/allowed-players`
 - `GET /api/v1/games/{gameID}/allowed-players`
 - `POST /api/v1/games/{gameID}/players`
 - `POST /api/v1/games/{gameID}/players/{playerID}/card`
 - `GET /api/v1/games/{gameID}/players/{playerID}/card`
+- `PATCH /api/v1/games/{gameID}/players/{playerID}/card/cells/{cellID}`
+- `POST /api/v1/games/{gameID}/claims`
+- `GET /api/v1/games/{gameID}/claims`
+- `GET /api/v1/games/{gameID}/summary`
 
 API responses are wrapped as `{ "data": ... }` for success and `{ "error": { "code": "...", "message": "..." } }` for errors. The API accepts `X-Request-ID` and returns it on each response.
 
@@ -129,6 +136,50 @@ curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/players/<player-id
 curl -sS http://localhost:8080/api/v1/games/<game-id>/players/<player-id>/card
 ```
 
+Start the game:
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/start \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host'
+```
+
+Call words. Repeat this command to advance the deterministic MVP caller through the active word set in `sort_order`:
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/calls \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host'
+
+curl -sS http://localhost:8080/api/v1/games/<game-id>/calls
+```
+
+Mark or unmark a card cell:
+
+```bash
+curl -sS -X PATCH http://localhost:8080/api/v1/games/<game-id>/players/<player-id>/card/cells/<cell-id> \
+  -H 'Content-Type: application/json' \
+  -d '{"marked":true}'
+```
+
+Submit a claim. The MVP validates `single_line` immediately on the backend and creates a top-3 winner row when valid:
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/claims \
+  -H 'Content-Type: application/json' \
+  -d '{"playerId":"<player-id>","pattern":"single_line"}'
+```
+
+Fetch host claim state and game summary:
+
+```bash
+curl -sS http://localhost:8080/api/v1/games/<game-id>/claims \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host'
+
+curl -sS http://localhost:8080/api/v1/games/<game-id>/summary
+```
+
 ## Test And Format
 
 ```bash
@@ -160,4 +211,4 @@ TEST_DATABASE_URL=postgres://bingo:bingo@localhost:5432/virtual_bingo?sslmode=di
 
 ## Current Deferrals
 
-The scaffold deliberately does not implement gameplay endpoints, Microsoft Entra, Microsoft Graph, Azure OpenAI, Azure Speech, rewards, voice profiles, or Azure deployment. Those are planned after the first local API and Postgres foundation is stable.
+The backend now owns the deterministic local MVP game state, but it still deliberately defers AI caller behavior, Azure Speech, Microsoft Graph delivery, Microsoft Entra production auth, rewards, SSE/realtime fanout, voice profiles, and Azure deployment. Those integrations should stay behind clean interfaces until the local game loop and frontend wiring are stable.
