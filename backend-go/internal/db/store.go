@@ -12,6 +12,7 @@ import (
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/audit"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/auth"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/domain"
+	"github.com/darkprince558/virtual-bingo/backend-go/internal/events"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -122,6 +123,87 @@ func (s *Store) UpdateGameRunStatus(ctx context.Context, gameRunID, status strin
 	`, gameRunID, status, startedAt, endedAt)
 
 	return scanGameRun(row)
+}
+
+type GameStatusTransitionParams struct {
+	GameRunID              string
+	Status                 string
+	StartedAt              *time.Time
+	EndedAt                *time.Time
+	ActorUserID            *string
+	EventType              string
+	AllowedCurrentStatuses []string
+	MarkJoinedPlayersLive  bool
+	Payload                map[string]any
+}
+
+func (s *Store) TransitionGameRunStatus(ctx context.Context, params GameStatusTransitionParams) (domain.GameRun, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.GameRun{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	run, err := getGameRunForUpdate(ctx, tx, params.GameRunID)
+	if err != nil {
+		return domain.GameRun{}, mapWriteError(err)
+	}
+	if len(params.AllowedCurrentStatuses) > 0 && !statusAllowed(run.Status, params.AllowedCurrentStatuses) {
+		return domain.GameRun{}, ErrConflict
+	}
+
+	row := tx.QueryRow(ctx, `
+		UPDATE game_runs
+		SET status = $2,
+		    started_at = CASE
+		      WHEN $3::timestamptz IS NULL THEN started_at
+		      WHEN $2 = 'live' THEN COALESCE(started_at, $3)
+		      ELSE $3
+		    END,
+		    ended_at = COALESCE($4, ended_at),
+		    updated_at = now()
+		WHERE id = $1
+		RETURNING id::text, template_id::text, host_user_id::text, word_set_id::text, code, name, status, scheduled_start_at, started_at, ended_at, current_called_word_id::text, winning_pattern, created_at, updated_at
+	`, params.GameRunID, params.Status, params.StartedAt, params.EndedAt)
+	run, err = scanGameRun(row)
+	if err != nil {
+		return domain.GameRun{}, mapWriteError(err)
+	}
+
+	if params.MarkJoinedPlayersLive {
+		if _, err := tx.Exec(ctx, `
+			UPDATE players
+			SET state = 'playing',
+			    updated_at = now()
+			WHERE game_run_id = $1
+			  AND state IN ('joined', 'waiting')
+		`, params.GameRunID); err != nil {
+			return domain.GameRun{}, mapWriteError(err)
+		}
+	}
+
+	if params.EventType != "" {
+		payload := params.Payload
+		if payload == nil {
+			payload = map[string]any{"status": run.Status}
+		}
+		if err := recordAuditEventInTx(ctx, tx, audit.Event{
+			GameRunID:   &params.GameRunID,
+			ActorUserID: params.ActorUserID,
+			EventType:   params.EventType,
+			EntityType:  "game_run",
+			EntityID:    &run.ID,
+			Payload:     payload,
+		}); err != nil {
+			return domain.GameRun{}, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.GameRun{}, mapWriteError(err)
+	}
+
+	return run, nil
 }
 
 type AddAllowedPlayerParams struct {
@@ -594,6 +676,177 @@ func (s *Store) ListBingoClaims(ctx context.Context, gameRunID string) ([]domain
 	return claims, nil
 }
 
+type ClaimValidationData struct {
+	GameRun     domain.GameRun
+	Player      domain.Player
+	Card        domain.BingoCard
+	CalledWords []domain.CalledWord
+}
+
+type ClaimValidationDecision struct {
+	Status           string
+	ValidationResult json.RawMessage
+	Valid            bool
+}
+
+type SubmitBingoClaimTxParams struct {
+	GameRunID        string
+	PlayerID         string
+	Pattern          string
+	ReviewedByUserID *string
+	Validate         func(ClaimValidationData) (ClaimValidationDecision, error)
+}
+
+type SubmitBingoClaimTxResult struct {
+	Claim  domain.BingoClaim
+	Winner *domain.Winner
+	Events []events.Event
+}
+
+func (s *Store) SubmitBingoClaimTx(ctx context.Context, params SubmitBingoClaimTxParams) (SubmitBingoClaimTxResult, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return SubmitBingoClaimTxResult{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	run, err := getGameRunForUpdate(ctx, tx, params.GameRunID)
+	if err != nil {
+		return SubmitBingoClaimTxResult{}, mapWriteError(err)
+	}
+
+	player, err := getPlayerForUpdate(ctx, tx, params.PlayerID)
+	if err != nil {
+		return SubmitBingoClaimTxResult{}, mapWriteError(err)
+	}
+
+	card, err := getPlayerCardInTx(ctx, tx, params.PlayerID)
+	if err != nil {
+		return SubmitBingoClaimTxResult{}, mapWriteError(err)
+	}
+
+	calledWords, err := listCalledWordsInTx(ctx, tx, params.GameRunID)
+	if err != nil {
+		return SubmitBingoClaimTxResult{}, mapWriteError(err)
+	}
+
+	if params.Validate == nil {
+		return SubmitBingoClaimTxResult{}, fmt.Errorf("claim validator is required")
+	}
+	decision, err := params.Validate(ClaimValidationData{
+		GameRun:     run,
+		Player:      player,
+		Card:        card,
+		CalledWords: calledWords,
+	})
+	if err != nil {
+		return SubmitBingoClaimTxResult{}, err
+	}
+	if decision.Status == "" {
+		return SubmitBingoClaimTxResult{}, fmt.Errorf("claim validator returned empty status")
+	}
+	if len(decision.ValidationResult) == 0 {
+		decision.ValidationResult = json.RawMessage(`{}`)
+	}
+
+	claimRow := tx.QueryRow(ctx, `
+		INSERT INTO bingo_claims (game_run_id, player_id, pattern, status, validation_result, reviewed_by_user_id, reviewed_at)
+		VALUES ($1, $2, $3, $4, $5, $6, now())
+		RETURNING id::text, game_run_id::text, player_id::text, pattern, status, validation_result, claimed_at, reviewed_by_user_id::text, reviewed_at, created_at, updated_at
+	`, params.GameRunID, params.PlayerID, params.Pattern, decision.Status, decision.ValidationResult, params.ReviewedByUserID)
+	claim, err := scanBingoClaim(claimRow)
+	if err != nil {
+		return SubmitBingoClaimTxResult{}, mapWriteError(err)
+	}
+
+	result := SubmitBingoClaimTxResult{
+		Claim: claim,
+		Events: []events.Event{
+			{Type: "claim.submitted", EntityID: claim.ID, Payload: map[string]any{"gameRunId": params.GameRunID, "playerId": params.PlayerID, "pattern": params.Pattern}},
+			{Type: "claim.validated", EntityID: claim.ID, Payload: map[string]any{"gameRunId": params.GameRunID, "status": claim.Status, "valid": decision.Valid}},
+		},
+	}
+
+	if err := recordAuditEventInTx(ctx, tx, audit.Event{GameRunID: &params.GameRunID, EventType: "claim.submitted", EntityType: "bingo_claim", EntityID: &claim.ID, Payload: map[string]any{"playerId": params.PlayerID, "pattern": params.Pattern}}); err != nil {
+		return SubmitBingoClaimTxResult{}, err
+	}
+	if err := recordAuditEventInTx(ctx, tx, audit.Event{GameRunID: &params.GameRunID, EventType: "claim.validated", EntityType: "bingo_claim", EntityID: &claim.ID, Payload: map[string]any{"status": claim.Status, "valid": decision.Valid}}); err != nil {
+		return SubmitBingoClaimTxResult{}, err
+	}
+
+	if decision.Valid {
+		if _, err := tx.Exec(ctx, `
+			UPDATE players
+			SET state = 'confirmed_winner',
+			    updated_at = now()
+			WHERE id = $1
+		`, params.PlayerID); err != nil {
+			return SubmitBingoClaimTxResult{}, mapWriteError(err)
+		}
+
+		existingWinner, err := getWinnerByPlayerPatternInTx(ctx, tx, params.GameRunID, params.PlayerID, params.Pattern)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return SubmitBingoClaimTxResult{}, err
+		}
+		if err == nil {
+			result.Winner = &existingWinner
+		} else {
+			winners, err := listWinnersForUpdateInTx(ctx, tx, params.GameRunID)
+			if err != nil {
+				return SubmitBingoClaimTxResult{}, err
+			}
+			if len(winners) < 3 {
+				placement := len(winners) + 1
+				winnerRow := tx.QueryRow(ctx, `
+					INSERT INTO winners (game_run_id, player_id, claim_id, placement, pattern)
+					VALUES ($1, $2, $3, $4, $5)
+					RETURNING id::text, game_run_id::text, player_id::text, claim_id::text, placement, pattern, confirmed_at, created_at
+				`, params.GameRunID, params.PlayerID, claim.ID, placement, params.Pattern)
+				winner, err := scanWinner(winnerRow)
+				if err != nil {
+					return SubmitBingoClaimTxResult{}, mapWriteError(err)
+				}
+				result.Winner = &winner
+				result.Events = append(result.Events, events.Event{Type: "winner.created", EntityID: winner.ID, Payload: map[string]any{"gameRunId": params.GameRunID, "playerId": params.PlayerID, "placement": winner.Placement}})
+				if err := recordAuditEventInTx(ctx, tx, audit.Event{GameRunID: &params.GameRunID, EventType: "winner.created", EntityType: "winner", EntityID: &winner.ID, Payload: map[string]any{"playerId": params.PlayerID, "placement": winner.Placement}}); err != nil {
+					return SubmitBingoClaimTxResult{}, err
+				}
+
+				if placement == 3 {
+					if _, err := tx.Exec(ctx, `
+						UPDATE game_runs
+						SET status = 'finished',
+						    ended_at = COALESCE(ended_at, now()),
+						    updated_at = now()
+						WHERE id = $1
+					`, params.GameRunID); err != nil {
+						return SubmitBingoClaimTxResult{}, mapWriteError(err)
+					}
+					result.Events = append(result.Events, events.Event{Type: "game.finished", EntityID: params.GameRunID, Payload: map[string]any{"status": "finished", "reason": "third_winner"}})
+					if err := recordAuditEventInTx(ctx, tx, audit.Event{GameRunID: &params.GameRunID, EventType: "game.finished", EntityType: "game_run", EntityID: &params.GameRunID, Payload: map[string]any{"reason": "third_winner"}}); err != nil {
+						return SubmitBingoClaimTxResult{}, err
+					}
+				}
+			}
+		}
+	} else if player.State != "confirmed_winner" {
+		if _, err := tx.Exec(ctx, `
+			UPDATE players
+			SET state = 'rejected_claim',
+			    updated_at = now()
+			WHERE id = $1
+		`, params.PlayerID); err != nil {
+			return SubmitBingoClaimTxResult{}, mapWriteError(err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return SubmitBingoClaimTxResult{}, mapWriteError(err)
+	}
+
+	return result, nil
+}
+
 type CreateWinnerParams struct {
 	GameRunID string
 	PlayerID  string
@@ -644,6 +897,33 @@ func (s *Store) ListWinners(ctx context.Context, gameRunID string) ([]domain.Win
 	return winners, nil
 }
 
+func (s *Store) ListPlayers(ctx context.Context, gameRunID string) ([]domain.Player, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, game_run_id::text, user_id::text, email, display_name, connection_state, state, joined_at, last_seen_at, created_at, updated_at
+		FROM players
+		WHERE game_run_id = $1
+		ORDER BY joined_at ASC, id ASC
+	`, gameRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	players := make([]domain.Player, 0)
+	for rows.Next() {
+		player, err := scanPlayer(rows)
+		if err != nil {
+			return nil, err
+		}
+		players = append(players, player)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return players, nil
+}
+
 func (s *Store) CountWinners(ctx context.Context, gameRunID string) (int, error) {
 	var count int
 	if err := s.pool.QueryRow(ctx, `
@@ -672,6 +952,173 @@ func (s *Store) CountPlayers(ctx context.Context, gameRunID string) (int, error)
 
 type scanner interface {
 	Scan(dest ...any) error
+}
+
+type queryer interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func getGameRunForUpdate(ctx context.Context, q queryer, gameRunID string) (domain.GameRun, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id::text, template_id::text, host_user_id::text, word_set_id::text, code, name, status, scheduled_start_at, started_at, ended_at, current_called_word_id::text, winning_pattern, created_at, updated_at
+		FROM game_runs
+		WHERE id = $1
+		FOR UPDATE
+	`, gameRunID)
+
+	return scanGameRun(row)
+}
+
+func getPlayerForUpdate(ctx context.Context, q queryer, playerID string) (domain.Player, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id::text, game_run_id::text, user_id::text, email, display_name, connection_state, state, joined_at, last_seen_at, created_at, updated_at
+		FROM players
+		WHERE id = $1
+		FOR UPDATE
+	`, playerID)
+
+	return scanPlayer(row)
+}
+
+func getPlayerCardInTx(ctx context.Context, q queryer, playerID string) (domain.BingoCard, error) {
+	cardRow := q.QueryRow(ctx, `
+		SELECT id::text, game_run_id::text, player_id::text, seed, created_at
+		FROM bingo_cards
+		WHERE player_id = $1
+		FOR UPDATE
+	`, playerID)
+
+	card, err := scanBingoCard(cardRow)
+	if err != nil {
+		return domain.BingoCard{}, err
+	}
+
+	rows, err := q.Query(ctx, `
+		SELECT id::text, card_id::text, row_index, col_index, word, is_free_space, marked_at, created_at
+		FROM bingo_card_cells
+		WHERE card_id = $1
+		ORDER BY row_index, col_index
+	`, card.ID)
+	if err != nil {
+		return domain.BingoCard{}, err
+	}
+	defer rows.Close()
+
+	card.Cells = make([]domain.BingoCardCell, 0)
+	for rows.Next() {
+		cell, err := scanBingoCardCell(rows)
+		if err != nil {
+			return domain.BingoCard{}, err
+		}
+		card.Cells = append(card.Cells, cell)
+	}
+	if err := rows.Err(); err != nil {
+		return domain.BingoCard{}, err
+	}
+
+	return card, nil
+}
+
+func listCalledWordsInTx(ctx context.Context, q queryer, gameRunID string) ([]domain.CalledWord, error) {
+	rows, err := q.Query(ctx, `
+		SELECT id::text, game_run_id::text, word_set_word_id::text, word, called_by_user_id::text, sequence, called_at, created_at
+		FROM called_words
+		WHERE game_run_id = $1
+		ORDER BY sequence ASC
+	`, gameRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	words := make([]domain.CalledWord, 0)
+	for rows.Next() {
+		word, err := scanCalledWord(rows)
+		if err != nil {
+			return nil, err
+		}
+		words = append(words, word)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return words, nil
+}
+
+func listWinnersForUpdateInTx(ctx context.Context, q queryer, gameRunID string) ([]domain.Winner, error) {
+	rows, err := q.Query(ctx, `
+		SELECT id::text, game_run_id::text, player_id::text, claim_id::text, placement, pattern, confirmed_at, created_at
+		FROM winners
+		WHERE game_run_id = $1
+		ORDER BY placement ASC, confirmed_at ASC
+		FOR UPDATE
+	`, gameRunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	winners := make([]domain.Winner, 0)
+	for rows.Next() {
+		winner, err := scanWinner(rows)
+		if err != nil {
+			return nil, err
+		}
+		winners = append(winners, winner)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return winners, nil
+}
+
+func getWinnerByPlayerPatternInTx(ctx context.Context, q queryer, gameRunID, playerID, pattern string) (domain.Winner, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id::text, game_run_id::text, player_id::text, claim_id::text, placement, pattern, confirmed_at, created_at
+		FROM winners
+		WHERE game_run_id = $1
+		  AND player_id = $2
+		  AND pattern = $3
+		ORDER BY placement ASC
+		LIMIT 1
+	`, gameRunID, playerID, pattern)
+
+	return scanWinner(row)
+}
+
+func recordAuditEventInTx(ctx context.Context, tx pgx.Tx, event audit.Event) error {
+	payload := event.Payload
+	if payload == nil {
+		payload = map[string]any{}
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal audit payload: %w", err)
+	}
+
+	_, err = tx.Exec(ctx, `
+		INSERT INTO audit_events (game_run_id, actor_user_id, event_type, entity_type, entity_id, payload)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, event.GameRunID, event.ActorUserID, event.EventType, event.EntityType, event.EntityID, payloadJSON)
+	if err != nil {
+		return mapWriteError(err)
+	}
+
+	return nil
+}
+
+func statusAllowed(status string, allowed []string) bool {
+	for _, candidate := range allowed {
+		if status == candidate {
+			return true
+		}
+	}
+
+	return false
 }
 
 func scanGameRun(row scanner) (domain.GameRun, error) {
