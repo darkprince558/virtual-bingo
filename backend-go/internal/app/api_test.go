@@ -142,6 +142,170 @@ func TestAPIGameAllowlistJoinAndCardFlow(t *testing.T) {
 	}
 }
 
+func TestAPIGameplayFlow(t *testing.T) {
+	ctx := context.Background()
+	databaseURL := createTestDatabase(t)
+	if err := db.RunMigrationsFromPath(databaseURL, "../db/migrations", db.MigrationUp); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	pool, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	defer pool.Close()
+
+	wordSetID := insertAPIWordSet(t, ctx, pool)
+	handler := NewServer(config.Config{AppEnv: "test", DatabaseURL: databaseURL}, testLogger(), pool).Handler
+
+	createResp := doRequest(t, handler, http.MethodPost, "/api/v1/games", map[string]any{
+		"name":      "Gameplay Test Game",
+		"code":      "GAMEPLAY-TEST",
+		"wordSetId": wordSetID,
+	})
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected create game 201, got %d: %s", createResp.StatusCode, createResp.Body)
+	}
+	gameID := stringFromData(t, createResp.Body, "id")
+
+	callBeforeStartResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/calls", nil)
+	if callBeforeStartResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected call before start 409, got %d: %s", callBeforeStartResp.StatusCode, callBeforeStartResp.Body)
+	}
+
+	alexID, alexCard := allowJoinAndAssignCard(t, handler, gameID, "alex-gameplay@example.local", "Alex Gameplay")
+	samID, _ := allowJoinAndAssignCard(t, handler, gameID, "sam-gameplay@example.local", "Sam Gameplay")
+
+	startResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/start", nil)
+	if startResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected start game 200, got %d: %s", startResp.StatusCode, startResp.Body)
+	}
+	if status := stringFromData(t, startResp.Body, "status"); status != "live" {
+		t.Fatalf("expected live status, got %s", status)
+	}
+
+	secondStartResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/start", nil)
+	if secondStartResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected second start game 200, got %d: %s", secondStartResp.StatusCode, secondStartResp.Body)
+	}
+	if status := stringFromData(t, secondStartResp.Body, "status"); status != "live" {
+		t.Fatalf("expected second start to stay live, got %s", status)
+	}
+
+	firstCallResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/calls", nil)
+	if firstCallResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected first call 201, got %d: %s", firstCallResp.StatusCode, firstCallResp.Body)
+	}
+	firstCall := calledWordFromData(t, firstCallResp.Body)
+	if firstCall.Sequence != 1 {
+		t.Fatalf("expected first sequence 1, got %+v", firstCall)
+	}
+
+	secondCallResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/calls", nil)
+	if secondCallResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected second call 201, got %d: %s", secondCallResp.StatusCode, secondCallResp.Body)
+	}
+	secondCall := calledWordFromData(t, secondCallResp.Body)
+	if secondCall.Sequence != 2 {
+		t.Fatalf("expected second sequence 2, got %+v", secondCall)
+	}
+
+	callsResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/calls", nil)
+	if callsResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected calls list 200, got %d: %s", callsResp.StatusCode, callsResp.Body)
+	}
+	calls := calledWordsFromData(t, callsResp.Body)
+	if len(calls) != 2 || calls[0].Sequence != 1 || calls[1].Sequence != 2 {
+		t.Fatalf("expected ordered calls with sequences 1 and 2, got %+v", calls)
+	}
+
+	markCell := firstNonFreeCell(t, alexCard.Cells)
+	markResp := doRequest(t, handler, http.MethodPatch, "/api/v1/games/"+gameID+"/players/"+alexID+"/card/cells/"+markCell.ID, map[string]any{"marked": true})
+	if markResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected mark cell 200, got %d: %s", markResp.StatusCode, markResp.Body)
+	}
+
+	getMarkedCardResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/players/"+alexID+"/card", nil)
+	if getMarkedCardResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected marked card fetch 200, got %d: %s", getMarkedCardResp.StatusCode, getMarkedCardResp.Body)
+	}
+	markedCard := cardFromData(t, getMarkedCardResp.Body)
+	if cellByID(t, markedCard.Cells, markCell.ID).MarkedAt == nil {
+		t.Fatalf("expected markedAt to be set after mark")
+	}
+
+	unmarkResp := doRequest(t, handler, http.MethodPatch, "/api/v1/games/"+gameID+"/players/"+alexID+"/card/cells/"+markCell.ID, map[string]any{"marked": false})
+	if unmarkResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected unmark cell 200, got %d: %s", unmarkResp.StatusCode, unmarkResp.Body)
+	}
+
+	getUnmarkedCardResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/players/"+alexID+"/card", nil)
+	if getUnmarkedCardResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected unmarked card fetch 200, got %d: %s", getUnmarkedCardResp.StatusCode, getUnmarkedCardResp.Body)
+	}
+	unmarkedCard := cardFromData(t, getUnmarkedCardResp.Body)
+	if cellByID(t, unmarkedCard.Cells, markCell.ID).MarkedAt != nil {
+		t.Fatalf("expected markedAt to clear after unmark")
+	}
+
+	invalidClaimResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/claims", map[string]any{
+		"playerId": samID,
+		"pattern":  "single_line",
+	})
+	if invalidClaimResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected invalid claim submission 201, got %d: %s", invalidClaimResp.StatusCode, invalidClaimResp.Body)
+	}
+	invalidClaim := claimSubmissionFromData(t, invalidClaimResp.Body)
+	if invalidClaim.Claim.Status != "invalid" || invalidClaim.Winner != nil {
+		t.Fatalf("expected invalid claim without winner, got %+v", invalidClaim)
+	}
+
+	calledSet := map[string]struct{}{
+		strings.ToLower(firstCall.Word):  {},
+		strings.ToLower(secondCall.Word): {},
+	}
+	for !hasCompleteLine(alexCard.Cells, calledSet) {
+		nextCallResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/calls", nil)
+		if nextCallResp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected next call while looking for line 201, got %d: %s", nextCallResp.StatusCode, nextCallResp.Body)
+		}
+		nextCall := calledWordFromData(t, nextCallResp.Body)
+		calledSet[strings.ToLower(nextCall.Word)] = struct{}{}
+		if len(calledSet) > 26 {
+			t.Fatalf("expected to complete a line before exhausting word set")
+		}
+	}
+
+	validClaimResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/claims", map[string]any{
+		"playerId": alexID,
+		"pattern":  "single_line",
+	})
+	if validClaimResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected valid claim submission 201, got %d: %s", validClaimResp.StatusCode, validClaimResp.Body)
+	}
+	validClaim := claimSubmissionFromData(t, validClaimResp.Body)
+	if validClaim.Claim.Status != "confirmed" || validClaim.Winner == nil || validClaim.Winner.Placement != 1 {
+		t.Fatalf("expected confirmed claim with first-place winner, got %+v", validClaim)
+	}
+
+	claimsResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/claims", nil)
+	if claimsResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected claims list 200, got %d: %s", claimsResp.StatusCode, claimsResp.Body)
+	}
+	if claims := claimsFromData(t, claimsResp.Body); len(claims) != 2 {
+		t.Fatalf("expected 2 claims, got %+v", claims)
+	}
+
+	summaryResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/summary", nil)
+	if summaryResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected summary 200, got %d: %s", summaryResp.StatusCode, summaryResp.Body)
+	}
+	summary := summaryFromData(t, summaryResp.Body)
+	if summary.Status != "live" || summary.PlayerCount != 2 || summary.CalledWordCount != len(calledSet) || len(summary.Claims) != 2 || len(summary.Winners) != 1 {
+		t.Fatalf("unexpected summary: %+v", summary)
+	}
+}
+
 type testResponse struct {
 	StatusCode int
 	Body       string
@@ -204,10 +368,48 @@ func stringFromData(t *testing.T, body, key string) string {
 }
 
 type apiCardCell struct {
-	RowIndex    int    `json:"rowIndex"`
-	ColIndex    int    `json:"colIndex"`
-	Word        string `json:"word"`
-	IsFreeSpace bool   `json:"isFreeSpace"`
+	ID          string     `json:"id"`
+	RowIndex    int        `json:"rowIndex"`
+	ColIndex    int        `json:"colIndex"`
+	Word        string     `json:"word"`
+	IsFreeSpace bool       `json:"isFreeSpace"`
+	MarkedAt    *time.Time `json:"markedAt"`
+}
+
+type apiCard struct {
+	ID        string        `json:"id"`
+	GameRunID string        `json:"gameRunId"`
+	PlayerID  string        `json:"playerId"`
+	Cells     []apiCardCell `json:"cells"`
+}
+
+type apiCalledWord struct {
+	ID       string `json:"id"`
+	Word     string `json:"word"`
+	Sequence int    `json:"sequence"`
+}
+
+type apiClaim struct {
+	ID     string `json:"id"`
+	Status string `json:"status"`
+}
+
+type apiWinner struct {
+	ID        string `json:"id"`
+	Placement int    `json:"placement"`
+}
+
+type apiClaimSubmission struct {
+	Claim  apiClaim   `json:"claim"`
+	Winner *apiWinner `json:"winner"`
+}
+
+type apiSummary struct {
+	Status          string      `json:"status"`
+	PlayerCount     int         `json:"playerCount"`
+	CalledWordCount int         `json:"calledWordCount"`
+	Claims          []apiClaim  `json:"claims"`
+	Winners         []apiWinner `json:"winners"`
 }
 
 func cellsFromData(t *testing.T, body string) []apiCardCell {
@@ -223,6 +425,195 @@ func cellsFromData(t *testing.T, body string) []apiCardCell {
 	}
 
 	return envelope.Data.Cells
+}
+
+func cardFromData(t *testing.T, body string) apiCard {
+	t.Helper()
+
+	var envelope struct {
+		Data apiCard `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode card response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func calledWordFromData(t *testing.T, body string) apiCalledWord {
+	t.Helper()
+
+	var envelope struct {
+		Data apiCalledWord `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode called word response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func calledWordsFromData(t *testing.T, body string) []apiCalledWord {
+	t.Helper()
+
+	var envelope struct {
+		Data []apiCalledWord `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode called words response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func claimSubmissionFromData(t *testing.T, body string) apiClaimSubmission {
+	t.Helper()
+
+	var envelope struct {
+		Data apiClaimSubmission `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode claim submission response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func claimsFromData(t *testing.T, body string) []apiClaim {
+	t.Helper()
+
+	var envelope struct {
+		Data []apiClaim `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode claims response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func summaryFromData(t *testing.T, body string) apiSummary {
+	t.Helper()
+
+	var envelope struct {
+		Data apiSummary `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode summary response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func allowJoinAndAssignCard(t *testing.T, handler http.Handler, gameID, email, displayName string) (string, apiCard) {
+	t.Helper()
+
+	allowedResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/allowed-players", map[string]any{
+		"email":       email,
+		"displayName": displayName,
+	})
+	if allowedResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected add allowed player 201, got %d: %s", allowedResp.StatusCode, allowedResp.Body)
+	}
+
+	joinResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/players", map[string]any{
+		"email":       email,
+		"displayName": displayName,
+	})
+	if joinResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected join player 201, got %d: %s", joinResp.StatusCode, joinResp.Body)
+	}
+	playerID := stringFromData(t, joinResp.Body, "id")
+
+	cardResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/players/"+playerID+"/card", nil)
+	if cardResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected assign card 201, got %d: %s", cardResp.StatusCode, cardResp.Body)
+	}
+
+	return playerID, cardFromData(t, cardResp.Body)
+}
+
+func firstNonFreeCell(t *testing.T, cells []apiCardCell) apiCardCell {
+	t.Helper()
+
+	for _, cell := range cells {
+		if !cell.IsFreeSpace {
+			return cell
+		}
+	}
+
+	t.Fatal("expected at least one non-free cell")
+	return apiCardCell{}
+}
+
+func cellByID(t *testing.T, cells []apiCardCell, id string) apiCardCell {
+	t.Helper()
+
+	for _, cell := range cells {
+		if cell.ID == id {
+			return cell
+		}
+	}
+
+	t.Fatalf("expected cell %s in card", id)
+	return apiCardCell{}
+}
+
+func hasCompleteLine(cells []apiCardCell, called map[string]struct{}) bool {
+	cellsByPosition := make(map[[2]int]apiCardCell, len(cells))
+	for _, cell := range cells {
+		cellsByPosition[[2]int{cell.RowIndex, cell.ColIndex}] = cell
+	}
+
+	for _, line := range testSingleLinePositions() {
+		complete := true
+		for _, position := range line {
+			cell, ok := cellsByPosition[position]
+			if !ok {
+				complete = false
+				break
+			}
+			if cell.IsFreeSpace {
+				continue
+			}
+			if _, ok := called[strings.ToLower(cell.Word)]; !ok {
+				complete = false
+				break
+			}
+		}
+		if complete {
+			return true
+		}
+	}
+
+	return false
+}
+
+func testSingleLinePositions() [][][2]int {
+	lines := make([][][2]int, 0, 12)
+	for row := 0; row < 5; row++ {
+		line := make([][2]int, 0, 5)
+		for col := 0; col < 5; col++ {
+			line = append(line, [2]int{row, col})
+		}
+		lines = append(lines, line)
+	}
+	for col := 0; col < 5; col++ {
+		line := make([][2]int, 0, 5)
+		for row := 0; row < 5; row++ {
+			line = append(line, [2]int{row, col})
+		}
+		lines = append(lines, line)
+	}
+
+	firstDiagonal := make([][2]int, 0, 5)
+	secondDiagonal := make([][2]int, 0, 5)
+	for index := 0; index < 5; index++ {
+		firstDiagonal = append(firstDiagonal, [2]int{index, index})
+		secondDiagonal = append(secondDiagonal, [2]int{index, 4 - index})
+	}
+
+	return append(lines, firstDiagonal, secondDiagonal)
 }
 
 func createTestDatabase(t *testing.T) string {
