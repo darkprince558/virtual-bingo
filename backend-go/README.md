@@ -27,6 +27,10 @@ The API listens on `http://localhost:8080` by default.
 - `POST /api/v1/games`
 - `GET /api/v1/games/{gameID}`
 - `POST /api/v1/games/{gameID}/start`
+- `POST /api/v1/games/{gameID}/pause`
+- `POST /api/v1/games/{gameID}/resume`
+- `POST /api/v1/games/{gameID}/finish`
+- `POST /api/v1/games/{gameID}/cancel`
 - `POST /api/v1/games/{gameID}/calls`
 - `GET /api/v1/games/{gameID}/calls`
 - `POST /api/v1/games/{gameID}/allowed-players`
@@ -50,6 +54,31 @@ X-Dev-User-Role: host
 ```
 
 This is intentionally shaped so Microsoft Entra JWT validation can later produce the same internal principal without changing handlers.
+
+## Game Rules Implemented
+
+The backend currently supports these deterministic winning patterns:
+
+- `single_line`: any row, column, or diagonal.
+- `four_corners`: the four corner cells.
+- `full_house`: every cell on the 5x5 card.
+
+If `game_runs.winning_pattern` is set, submitted claims must use that exact pattern. If a game has no configured winning pattern, the MVP default is `single_line`; explicit `four_corners` or `full_house` claims are rejected until the host creates the game with that winning pattern.
+
+Claim validation is pure Go logic in `internal/bingo`. Free spaces count automatically, and non-free cells count only when their word has already been called by the backend. Claim submission is transactional: claim persistence, validation result, winner placement, player-state updates, third-winner game finish, and audit rows commit or roll back together. Events are published only after the database transaction commits.
+
+Winner placement is serialized per game run and remains limited to the top 3. Repeating the same valid player/pattern claim returns the existing winner placement instead of creating a duplicate winner row; the same player can still win different supported patterns in games that allow those patterns.
+
+Lifecycle rules:
+
+- `start`: `draft`, `scheduled`, `invites_sent`, or `lobby_open` -> `live`; joined/waiting players move to `playing`.
+- `pause`: `live` -> `paused`.
+- `resume`: `paused` -> `live`.
+- `finish`: `live` or `paused` -> `finished`; `ended_at` is set if missing.
+- `cancel`: `draft`, `scheduled`, `invites_sent`, `lobby_open`, `live`, or `paused` -> `cancelled`; `ended_at` is set if the game had started.
+- Words can only be called while `live`.
+- Claims are accepted for validation while `live` or `paused`, matching the architecture docs.
+- When all active word-set words have been called, another call returns `409 conflict`; the game does not auto-finish from word exhaustion alone.
 
 ## Database
 
@@ -144,6 +173,18 @@ curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/start \
   -H 'X-Dev-User-Role: host'
 ```
 
+Pause and resume the game:
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/pause \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host'
+
+curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/resume \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host'
+```
+
 Call words. Repeat this command to advance the deterministic MVP caller through the active word set in `sort_order`:
 
 ```bash
@@ -180,6 +221,18 @@ curl -sS http://localhost:8080/api/v1/games/<game-id>/claims \
 curl -sS http://localhost:8080/api/v1/games/<game-id>/summary
 ```
 
+Finish or cancel a game:
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/finish \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host'
+
+curl -sS -X POST http://localhost:8080/api/v1/games/<other-game-id>/cancel \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host'
+```
+
 ## Test And Format
 
 ```bash
@@ -211,4 +264,4 @@ TEST_DATABASE_URL=postgres://bingo:bingo@localhost:5432/virtual_bingo?sslmode=di
 
 ## Current Deferrals
 
-The backend now owns the deterministic local MVP game state, but it still deliberately defers AI caller behavior, Azure Speech, Microsoft Graph delivery, Microsoft Entra production auth, rewards, SSE/realtime fanout, voice profiles, and Azure deployment. Those integrations should stay behind clean interfaces until the local game loop and frontend wiring are stable.
+The backend now owns the deterministic local MVP game state, but it still deliberately defers Microsoft Entra production auth, Microsoft Graph delivery, Teams automation, email delivery, AI caller behavior, Azure Speech, rewards, SSE/realtime fanout, voice profiles, Azure deployment, and frontend wiring. Those integrations should stay behind clean interfaces until the local game loop and frontend integration are stable.
