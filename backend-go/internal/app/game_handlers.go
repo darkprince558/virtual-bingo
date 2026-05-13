@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"time"
@@ -95,6 +96,42 @@ func (s *Server) startGame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	run, err := s.service.StartGame(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, gameRunResponseFromDomain(run))
+}
+
+func (s *Server) pauseGame(w http.ResponseWriter, r *http.Request) {
+	s.lifecycleGame(w, r, s.service.PauseGame)
+}
+
+func (s *Server) resumeGame(w http.ResponseWriter, r *http.Request) {
+	s.lifecycleGame(w, r, s.service.ResumeGame)
+}
+
+func (s *Server) finishGame(w http.ResponseWriter, r *http.Request) {
+	s.lifecycleGame(w, r, s.service.FinishGame)
+}
+
+func (s *Server) cancelGame(w http.ResponseWriter, r *http.Request) {
+	s.lifecycleGame(w, r, s.service.CancelGame)
+}
+
+func (s *Server) lifecycleGame(w http.ResponseWriter, r *http.Request, action func(context.Context, auth.Principal, string) (game.GameRunWithCounts, error)) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	run, err := action(r.Context(), principal, r.PathValue("gameID"))
 	if err != nil {
 		mapServiceError(w, err)
 		return
@@ -434,13 +471,15 @@ type winnerResponse struct {
 }
 
 type gameSummaryResponse struct {
-	GameRun         gameRunResponse     `json:"gameRun"`
-	PlayerCount     int                 `json:"playerCount"`
-	CalledWordCount int                 `json:"calledWordCount"`
-	CurrentWord     *calledWordResponse `json:"currentWord,omitempty"`
-	Claims          []claimResponse     `json:"claims"`
-	Winners         []winnerResponse    `json:"winners"`
-	Status          string              `json:"status"`
+	GameRun         gameRunResponse      `json:"gameRun"`
+	PlayerCount     int                  `json:"playerCount"`
+	CalledWordCount int                  `json:"calledWordCount"`
+	CurrentWord     *calledWordResponse  `json:"currentWord,omitempty"`
+	Claims          []claimResponse      `json:"claims"`
+	Winners         []winnerResponse     `json:"winners"`
+	Players         []playerResponse     `json:"players"`
+	CalledWords     []calledWordResponse `json:"calledWords"`
+	Status          string               `json:"status"`
 }
 
 func gameRunResponseFromDomain(run game.GameRunWithCounts) gameRunResponse {
@@ -584,6 +623,14 @@ func gameSummaryResponseFromDomain(summary domain.GameSummary) gameSummaryRespon
 	for _, winner := range summary.Winners {
 		winners = append(winners, winnerResponseFromDomain(winner))
 	}
+	players := make([]playerResponse, 0, len(summary.Players))
+	for _, player := range summary.Players {
+		players = append(players, playerResponseFromDomain(player))
+	}
+	calledWords := make([]calledWordResponse, 0, len(summary.CalledWords))
+	for _, word := range summary.CalledWords {
+		calledWords = append(calledWords, calledWordResponseFromDomain(word))
+	}
 
 	var currentWord *calledWordResponse
 	if summary.CurrentWord != nil {
@@ -598,6 +645,8 @@ func gameSummaryResponseFromDomain(summary domain.GameSummary) gameSummaryRespon
 		CurrentWord:     currentWord,
 		Claims:          claims,
 		Winners:         winners,
+		Players:         players,
+		CalledWords:     calledWords,
 		Status:          summary.Status,
 	}
 }
