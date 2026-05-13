@@ -14,6 +14,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -304,6 +305,219 @@ func TestAPIGameplayFlow(t *testing.T) {
 	if summary.Status != "live" || summary.PlayerCount != 2 || summary.CalledWordCount != len(calledSet) || len(summary.Claims) != 2 || len(summary.Winners) != 1 {
 		t.Fatalf("unexpected summary: %+v", summary)
 	}
+	if state := playerState(summary.Players, alexID); state != "confirmed_winner" {
+		t.Fatalf("expected Alex to be confirmed_winner, got %s", state)
+	}
+	if state := playerState(summary.Players, samID); state != "rejected_claim" {
+		t.Fatalf("expected Sam to be rejected_claim, got %s", state)
+	}
+	if len(summary.CalledWords) != summary.CalledWordCount || summary.CurrentWord == nil {
+		t.Fatalf("expected summary called-word details, got %+v", summary)
+	}
+}
+
+func TestAPILifecycleFlow(t *testing.T) {
+	ctx := context.Background()
+	databaseURL := createTestDatabase(t)
+	if err := db.RunMigrationsFromPath(databaseURL, "../db/migrations", db.MigrationUp); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	pool, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	defer pool.Close()
+
+	wordSetID := insertAPIWordSet(t, ctx, pool)
+	handler := NewServer(config.Config{AppEnv: "test", DatabaseURL: databaseURL}, testLogger(), pool).Handler
+	gameID := createAPIGame(t, handler, "Lifecycle Test Game", "LIFECYCLE-TEST", wordSetID, nil)
+	playerID, _ := allowJoinAndAssignCard(t, handler, gameID, "life@example.local", "Life Cycle")
+
+	startResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/start", nil)
+	if startResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected start 200, got %d: %s", startResp.StatusCode, startResp.Body)
+	}
+	startSummary := fetchSummary(t, handler, gameID)
+	if state := playerState(startSummary.Players, playerID); state != "playing" {
+		t.Fatalf("expected joined player to move to playing, got %s", state)
+	}
+
+	pauseResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/pause", nil)
+	if pauseResp.StatusCode != http.StatusOK || stringFromData(t, pauseResp.Body, "status") != "paused" {
+		t.Fatalf("expected pause 200 paused, got %d: %s", pauseResp.StatusCode, pauseResp.Body)
+	}
+	callPausedResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/calls", nil)
+	if callPausedResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected call while paused 409, got %d: %s", callPausedResp.StatusCode, callPausedResp.Body)
+	}
+	pausedClaimResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/claims", map[string]any{
+		"playerId": playerID,
+		"pattern":  "single_line",
+	})
+	if pausedClaimResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected paused claim to be accepted for validation, got %d: %s", pausedClaimResp.StatusCode, pausedClaimResp.Body)
+	}
+
+	resumeResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/resume", nil)
+	if resumeResp.StatusCode != http.StatusOK || stringFromData(t, resumeResp.Body, "status") != "live" {
+		t.Fatalf("expected resume 200 live, got %d: %s", resumeResp.StatusCode, resumeResp.Body)
+	}
+	finishResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/finish", nil)
+	if finishResp.StatusCode != http.StatusOK || stringFromData(t, finishResp.Body, "status") != "finished" {
+		t.Fatalf("expected finish 200 finished, got %d: %s", finishResp.StatusCode, finishResp.Body)
+	}
+	startFinishedResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/start", nil)
+	if startFinishedResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected start after finished 409, got %d: %s", startFinishedResp.StatusCode, startFinishedResp.Body)
+	}
+
+	cancelGameID := createAPIGame(t, handler, "Cancel Test Game", "CANCEL-TEST", wordSetID, nil)
+	cancelResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+cancelGameID+"/cancel", nil)
+	if cancelResp.StatusCode != http.StatusOK || stringFromData(t, cancelResp.Body, "status") != "cancelled" {
+		t.Fatalf("expected cancel 200 cancelled, got %d: %s", cancelResp.StatusCode, cancelResp.Body)
+	}
+	startCancelledResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+cancelGameID+"/start", nil)
+	if startCancelledResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected start after cancelled 409, got %d: %s", startCancelledResp.StatusCode, startCancelledResp.Body)
+	}
+}
+
+func TestAPIWinningPatternAndWordExhaustion(t *testing.T) {
+	ctx := context.Background()
+	databaseURL := createTestDatabase(t)
+	if err := db.RunMigrationsFromPath(databaseURL, "../db/migrations", db.MigrationUp); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	pool, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	defer pool.Close()
+
+	wordSetID := insertAPIWordSet(t, ctx, pool)
+	handler := NewServer(config.Config{AppEnv: "test", DatabaseURL: databaseURL}, testLogger(), pool).Handler
+
+	defaultGameID := createAPIGame(t, handler, "Default Pattern Game", "DEFAULT-PATTERN", wordSetID, nil)
+	unsupportedResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+defaultGameID+"/claims", map[string]any{
+		"playerId": "00000000-0000-0000-0000-000000000000",
+		"pattern":  "postage_stamp",
+	})
+	if unsupportedResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected unsupported pattern 400, got %d: %s", unsupportedResp.StatusCode, unsupportedResp.Body)
+	}
+	defaultPlayerID, _ := allowJoinAndAssignCard(t, handler, defaultGameID, "default-pattern@example.local", "Default Pattern")
+	disallowedResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+defaultGameID+"/claims", map[string]any{
+		"playerId": defaultPlayerID,
+		"pattern":  "four_corners",
+	})
+	if disallowedResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected disallowed default pattern 400, got %d: %s", disallowedResp.StatusCode, disallowedResp.Body)
+	}
+
+	pattern := "four_corners"
+	fourCornersGameID := createAPIGame(t, handler, "Four Corners Game", "FOUR-CORNERS", wordSetID, &pattern)
+	playerID, _ := allowJoinAndAssignCard(t, handler, fourCornersGameID, "corners@example.local", "Corners Player")
+	if resp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+fourCornersGameID+"/start", nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected start 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+	called := callAllWords(t, handler, fourCornersGameID)
+	if len(called) != 26 {
+		t.Fatalf("expected 26 called words, got %d", len(called))
+	}
+	extraCallResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+fourCornersGameID+"/calls", nil)
+	if extraCallResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected exhausted word call 409, got %d: %s", extraCallResp.StatusCode, extraCallResp.Body)
+	}
+	validResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+fourCornersGameID+"/claims", map[string]any{
+		"playerId": playerID,
+		"pattern":  "four_corners",
+	})
+	if validResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected four-corners claim 201, got %d: %s", validResp.StatusCode, validResp.Body)
+	}
+	if claim := claimSubmissionFromData(t, validResp.Body); claim.Claim.Status != "confirmed" || claim.Winner == nil {
+		t.Fatalf("expected confirmed four-corners winner, got %+v", claim)
+	}
+	summary := fetchSummary(t, handler, fourCornersGameID)
+	if summary.Status != "live" || summary.CalledWordCount != 26 || summary.CurrentWord == nil {
+		t.Fatalf("expected exhausted game to stay live with current word, got %+v", summary)
+	}
+}
+
+func TestAPIWinnerHardening(t *testing.T) {
+	ctx := context.Background()
+	databaseURL := createTestDatabase(t)
+	if err := db.RunMigrationsFromPath(databaseURL, "../db/migrations", db.MigrationUp); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	pool, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	defer pool.Close()
+
+	wordSetID := insertAPIWordSet(t, ctx, pool)
+	handler := NewServer(config.Config{AppEnv: "test", DatabaseURL: databaseURL}, testLogger(), pool).Handler
+	gameID := createAPIGame(t, handler, "Winner Hardening Game", "WINNER-HARDENING", wordSetID, nil)
+	alexID, _ := allowJoinAndAssignCard(t, handler, gameID, "winner-a@example.local", "Winner A")
+	samID, _ := allowJoinAndAssignCard(t, handler, gameID, "winner-b@example.local", "Winner B")
+	taylorID, _ := allowJoinAndAssignCard(t, handler, gameID, "winner-c@example.local", "Winner C")
+	if resp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/start", nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected start 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+	callAllWords(t, handler, gameID)
+
+	firstResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/claims", map[string]any{
+		"playerId": alexID,
+		"pattern":  "single_line",
+	})
+	if firstResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected first claim 201, got %d: %s", firstResp.StatusCode, firstResp.Body)
+	}
+	repeatResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/claims", map[string]any{
+		"playerId": alexID,
+		"pattern":  "single_line",
+	})
+	if repeatResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected repeated valid claim 201, got %d: %s", repeatResp.StatusCode, repeatResp.Body)
+	}
+	if summary := fetchSummary(t, handler, gameID); len(summary.Winners) != 1 {
+		t.Fatalf("expected repeated same player/pattern claim not to duplicate winner, got %+v", summary.Winners)
+	}
+
+	var wg sync.WaitGroup
+	responses := make([]testResponse, 2)
+	for index, playerID := range []string{samID, taylorID} {
+		wg.Add(1)
+		go func(index int, playerID string) {
+			defer wg.Done()
+			responses[index] = doRequestForConcurrent(handler, http.MethodPost, "/api/v1/games/"+gameID+"/claims", map[string]any{
+				"playerId": playerID,
+				"pattern":  "single_line",
+			})
+		}(index, playerID)
+	}
+	wg.Wait()
+	for _, resp := range responses {
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected concurrent claim 201, got %d: %s", resp.StatusCode, resp.Body)
+		}
+	}
+
+	summary := fetchSummary(t, handler, gameID)
+	if summary.Status != "finished" || len(summary.Winners) != 3 {
+		t.Fatalf("expected third winner to finish game with 3 winners, got %+v", summary)
+	}
+	placements := map[int]bool{}
+	for _, winner := range summary.Winners {
+		if placements[winner.Placement] {
+			t.Fatalf("duplicate winner placement in %+v", summary.Winners)
+		}
+		placements[winner.Placement] = true
+	}
 }
 
 type testResponse struct {
@@ -344,6 +558,38 @@ func doRequest(t *testing.T, handler http.Handler, method, path string, body any
 
 	if got := resp.Header.Get("X-Request-ID"); got != "test-request-id" {
 		t.Fatalf("expected request id response header, got %q", got)
+	}
+
+	return testResponse{StatusCode: resp.StatusCode, Body: string(responseBody)}
+}
+
+func doRequestForConcurrent(handler http.Handler, method, path string, body any) testResponse {
+	var reader io.Reader
+	if body != nil {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			return testResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}
+		}
+		reader = bytes.NewReader(payload)
+	}
+
+	req := httptest.NewRequest(method, path, reader)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("X-Dev-User-Email", "host@example.local")
+	req.Header.Set("X-Dev-User-Name", "Host User")
+	req.Header.Set("X-Dev-User-Role", "host")
+	req.Header.Set("X-Request-ID", "test-request-id")
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	resp := recorder.Result()
+	defer resp.Body.Close()
+
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return testResponse{StatusCode: http.StatusInternalServerError, Body: err.Error()}
 	}
 
 	return testResponse{StatusCode: resp.StatusCode, Body: string(responseBody)}
@@ -390,13 +636,17 @@ type apiCalledWord struct {
 }
 
 type apiClaim struct {
-	ID     string `json:"id"`
-	Status string `json:"status"`
+	ID       string `json:"id"`
+	PlayerID string `json:"playerId"`
+	Pattern  string `json:"pattern"`
+	Status   string `json:"status"`
 }
 
 type apiWinner struct {
-	ID        string `json:"id"`
-	Placement int    `json:"placement"`
+	ID        string  `json:"id"`
+	PlayerID  string  `json:"playerId"`
+	ClaimID   *string `json:"claimId"`
+	Placement int     `json:"placement"`
 }
 
 type apiClaimSubmission struct {
@@ -405,11 +655,19 @@ type apiClaimSubmission struct {
 }
 
 type apiSummary struct {
-	Status          string      `json:"status"`
-	PlayerCount     int         `json:"playerCount"`
-	CalledWordCount int         `json:"calledWordCount"`
-	Claims          []apiClaim  `json:"claims"`
-	Winners         []apiWinner `json:"winners"`
+	Status          string          `json:"status"`
+	PlayerCount     int             `json:"playerCount"`
+	CalledWordCount int             `json:"calledWordCount"`
+	CurrentWord     *apiCalledWord  `json:"currentWord"`
+	Claims          []apiClaim      `json:"claims"`
+	Winners         []apiWinner     `json:"winners"`
+	Players         []apiPlayer     `json:"players"`
+	CalledWords     []apiCalledWord `json:"calledWords"`
+}
+
+type apiPlayer struct {
+	ID    string `json:"id"`
+	State string `json:"state"`
 }
 
 func cellsFromData(t *testing.T, body string) []apiCardCell {
@@ -531,6 +789,62 @@ func allowJoinAndAssignCard(t *testing.T, handler http.Handler, gameID, email, d
 	}
 
 	return playerID, cardFromData(t, cardResp.Body)
+}
+
+func createAPIGame(t *testing.T, handler http.Handler, name, code, wordSetID string, winningPattern *string) string {
+	t.Helper()
+
+	body := map[string]any{
+		"name":      name,
+		"code":      code,
+		"wordSetId": wordSetID,
+	}
+	if winningPattern != nil {
+		body["winningPattern"] = *winningPattern
+	}
+
+	resp := doRequest(t, handler, http.MethodPost, "/api/v1/games", body)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected create game 201, got %d: %s", resp.StatusCode, resp.Body)
+	}
+
+	return stringFromData(t, resp.Body, "id")
+}
+
+func callAllWords(t *testing.T, handler http.Handler, gameID string) []apiCalledWord {
+	t.Helper()
+
+	words := make([]apiCalledWord, 0, 26)
+	for index := 0; index < 26; index++ {
+		resp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/calls", nil)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected call %d to return 201, got %d: %s", index+1, resp.StatusCode, resp.Body)
+		}
+		words = append(words, calledWordFromData(t, resp.Body))
+	}
+
+	return words
+}
+
+func fetchSummary(t *testing.T, handler http.Handler, gameID string) apiSummary {
+	t.Helper()
+
+	resp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/summary", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected summary 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+
+	return summaryFromData(t, resp.Body)
+}
+
+func playerState(players []apiPlayer, playerID string) string {
+	for _, player := range players {
+		if player.ID == playerID {
+			return player.State
+		}
+	}
+
+	return ""
 }
 
 func firstNonFreeCell(t *testing.T, cells []apiCardCell) apiCardCell {
