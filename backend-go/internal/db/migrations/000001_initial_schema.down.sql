@@ -1,0 +1,16 @@
+DROP TABLE IF EXISTS audit_events;
+DROP TABLE IF EXISTS winners;
+DROP TABLE IF EXISTS bingo_claims;
+ALTER TABLE IF EXISTS game_runs DROP CONSTRAINT IF EXISTS game_runs_current_called_word_fk;
+DROP TABLE IF EXISTS called_words;
+DROP TABLE IF EXISTS bingo_card_cells;
+DROP TABLE IF EXISTS bingo_cards;
+DROP TABLE IF EXISTS players;
+DROP TABLE IF EXISTS allowed_players;
+DROP TABLE IF EXISTS game_runs;
+DROP TABLE IF EXISTS game_templates;
+DROP TABLE IF EXISTS word_set_words;
+DROP TABLE IF EXISTS word_sets;
+DROP TABLE IF EXISTS host_privilege_requests;
+DROP TABLE IF EXISTS users;
+DROP EXTENSION IF EXISTS pgcrypto;
