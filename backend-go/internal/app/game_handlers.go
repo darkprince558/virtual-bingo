@@ -1,9 +1,11 @@
 package app
 
 import (
+	"encoding/json"
 	"net/http"
 	"time"
 
+	"github.com/darkprince558/virtual-bingo/backend-go/internal/auth"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/domain"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/game"
 )
@@ -24,6 +26,15 @@ type addAllowedPlayerRequest struct {
 type joinPlayerRequest struct {
 	Email       string `json:"email"`
 	DisplayName string `json:"displayName"`
+}
+
+type markCardCellRequest struct {
+	Marked bool `json:"marked"`
+}
+
+type submitBingoClaimRequest struct {
+	PlayerID string `json:"playerId"`
+	Pattern  string `json:"pattern"`
 }
 
 func (s *Server) createGame(w http.ResponseWriter, r *http.Request) {
@@ -70,6 +81,65 @@ func (s *Server) getGame(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeData(w, http.StatusOK, gameRunResponseFromDomain(run))
+}
+
+func (s *Server) startGame(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	run, err := s.service.StartGame(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, gameRunResponseFromDomain(run))
+}
+
+func (s *Server) callNextWord(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	calledWord, err := s.service.CallNextWord(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusCreated, calledWordResponseFromDomain(calledWord))
+}
+
+func (s *Server) listCalledWords(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	calledWords, err := s.service.ListCalledWords(r.Context(), r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	response := make([]calledWordResponse, 0, len(calledWords))
+	for _, calledWord := range calledWords {
+		response = append(response, calledWordResponseFromDomain(calledWord))
+	}
+
+	writeData(w, http.StatusOK, response)
 }
 
 func (s *Server) addAllowedPlayer(w http.ResponseWriter, r *http.Request) {
@@ -173,21 +243,114 @@ func (s *Server) getPlayerCard(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, cardResponseFromDomain(card))
 }
 
+func (s *Server) markCardCell(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	var req markCardCellRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "validation_error", "request body must be valid JSON")
+		return
+	}
+
+	cell, err := s.service.MarkCardCell(r.Context(), game.MarkCardCellInput{
+		GameRunID: r.PathValue("gameID"),
+		PlayerID:  r.PathValue("playerID"),
+		CellID:    r.PathValue("cellID"),
+		Marked:    req.Marked,
+	})
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, cardCellResponseFromDomain(cell))
+}
+
+func (s *Server) submitBingoClaim(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	var req submitBingoClaimRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "validation_error", "request body must be valid JSON")
+		return
+	}
+
+	result, err := s.service.SubmitBingoClaim(r.Context(), game.SubmitBingoClaimInput{
+		GameRunID: r.PathValue("gameID"),
+		PlayerID:  req.PlayerID,
+		Pattern:   req.Pattern,
+	})
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusCreated, claimSubmissionResponseFromDomain(result))
+}
+
+func (s *Server) listBingoClaims(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	if !auth.HasRole(principal, "admin", "host") {
+		mapServiceError(w, game.ErrForbidden)
+		return
+	}
+
+	claims, err := s.service.ListBingoClaims(r.Context(), r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	response := make([]claimResponse, 0, len(claims))
+	for _, claim := range claims {
+		response = append(response, claimResponseFromDomain(claim))
+	}
+
+	writeData(w, http.StatusOK, response)
+}
+
+func (s *Server) getGameSummary(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	summary, err := s.service.GetGameSummary(r.Context(), r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, gameSummaryResponseFromDomain(summary))
+}
+
 type gameRunResponse struct {
-	ID                 string     `json:"id"`
-	TemplateID         *string    `json:"templateId,omitempty"`
-	HostUserID         string     `json:"hostUserId"`
-	WordSetID          *string    `json:"wordSetId,omitempty"`
-	Code               string     `json:"code"`
-	Name               string     `json:"name"`
-	Status             string     `json:"status"`
-	ScheduledStartAt   *time.Time `json:"scheduledStartAt,omitempty"`
-	StartedAt          *time.Time `json:"startedAt,omitempty"`
-	EndedAt            *time.Time `json:"endedAt,omitempty"`
-	WinningPattern     *string    `json:"winningPattern,omitempty"`
-	AllowedPlayerCount int        `json:"allowedPlayerCount"`
-	CreatedAt          time.Time  `json:"createdAt"`
-	UpdatedAt          time.Time  `json:"updatedAt"`
+	ID                  string     `json:"id"`
+	TemplateID          *string    `json:"templateId,omitempty"`
+	HostUserID          string     `json:"hostUserId"`
+	WordSetID           *string    `json:"wordSetId,omitempty"`
+	Code                string     `json:"code"`
+	Name                string     `json:"name"`
+	Status              string     `json:"status"`
+	ScheduledStartAt    *time.Time `json:"scheduledStartAt,omitempty"`
+	StartedAt           *time.Time `json:"startedAt,omitempty"`
+	EndedAt             *time.Time `json:"endedAt,omitempty"`
+	CurrentCalledWordID *string    `json:"currentCalledWordId,omitempty"`
+	WinningPattern      *string    `json:"winningPattern,omitempty"`
+	AllowedPlayerCount  int        `json:"allowedPlayerCount"`
+	CreatedAt           time.Time  `json:"createdAt"`
+	UpdatedAt           time.Time  `json:"updatedAt"`
 }
 
 type allowedPlayerResponse struct {
@@ -229,22 +392,74 @@ type cardCellResponse struct {
 	MarkedAt    *time.Time `json:"markedAt,omitempty"`
 }
 
+type calledWordResponse struct {
+	ID             string    `json:"id"`
+	GameRunID      string    `json:"gameRunId"`
+	WordSetWordID  *string   `json:"wordSetWordId,omitempty"`
+	Word           string    `json:"word"`
+	CalledByUserID *string   `json:"calledByUserId,omitempty"`
+	Sequence       int       `json:"sequence"`
+	CalledAt       time.Time `json:"calledAt"`
+	CreatedAt      time.Time `json:"createdAt"`
+}
+
+type claimResponse struct {
+	ID               string          `json:"id"`
+	GameRunID        string          `json:"gameRunId"`
+	PlayerID         string          `json:"playerId"`
+	Pattern          string          `json:"pattern"`
+	Status           string          `json:"status"`
+	ValidationResult json.RawMessage `json:"validationResult"`
+	ClaimedAt        time.Time       `json:"claimedAt"`
+	ReviewedByUserID *string         `json:"reviewedByUserId,omitempty"`
+	ReviewedAt       *time.Time      `json:"reviewedAt,omitempty"`
+	CreatedAt        time.Time       `json:"createdAt"`
+	UpdatedAt        time.Time       `json:"updatedAt"`
+}
+
+type claimSubmissionResponse struct {
+	Claim  claimResponse   `json:"claim"`
+	Winner *winnerResponse `json:"winner,omitempty"`
+}
+
+type winnerResponse struct {
+	ID          string    `json:"id"`
+	GameRunID   string    `json:"gameRunId"`
+	PlayerID    string    `json:"playerId"`
+	ClaimID     *string   `json:"claimId,omitempty"`
+	Placement   int       `json:"placement"`
+	Pattern     string    `json:"pattern"`
+	ConfirmedAt time.Time `json:"confirmedAt"`
+	CreatedAt   time.Time `json:"createdAt"`
+}
+
+type gameSummaryResponse struct {
+	GameRun         gameRunResponse     `json:"gameRun"`
+	PlayerCount     int                 `json:"playerCount"`
+	CalledWordCount int                 `json:"calledWordCount"`
+	CurrentWord     *calledWordResponse `json:"currentWord,omitempty"`
+	Claims          []claimResponse     `json:"claims"`
+	Winners         []winnerResponse    `json:"winners"`
+	Status          string              `json:"status"`
+}
+
 func gameRunResponseFromDomain(run game.GameRunWithCounts) gameRunResponse {
 	return gameRunResponse{
-		ID:                 run.GameRun.ID,
-		TemplateID:         run.GameRun.TemplateID,
-		HostUserID:         run.GameRun.HostUserID,
-		WordSetID:          run.GameRun.WordSetID,
-		Code:               run.GameRun.Code,
-		Name:               run.GameRun.Name,
-		Status:             run.GameRun.Status,
-		ScheduledStartAt:   run.GameRun.ScheduledStartAt,
-		StartedAt:          run.GameRun.StartedAt,
-		EndedAt:            run.GameRun.EndedAt,
-		WinningPattern:     run.GameRun.WinningPattern,
-		AllowedPlayerCount: run.AllowedPlayerCount,
-		CreatedAt:          run.GameRun.CreatedAt,
-		UpdatedAt:          run.GameRun.UpdatedAt,
+		ID:                  run.GameRun.ID,
+		TemplateID:          run.GameRun.TemplateID,
+		HostUserID:          run.GameRun.HostUserID,
+		WordSetID:           run.GameRun.WordSetID,
+		Code:                run.GameRun.Code,
+		Name:                run.GameRun.Name,
+		Status:              run.GameRun.Status,
+		ScheduledStartAt:    run.GameRun.ScheduledStartAt,
+		StartedAt:           run.GameRun.StartedAt,
+		EndedAt:             run.GameRun.EndedAt,
+		CurrentCalledWordID: run.GameRun.CurrentCalledWordID,
+		WinningPattern:      run.GameRun.WinningPattern,
+		AllowedPlayerCount:  run.AllowedPlayerCount,
+		CreatedAt:           run.GameRun.CreatedAt,
+		UpdatedAt:           run.GameRun.UpdatedAt,
 	}
 }
 
@@ -273,17 +488,21 @@ func playerResponseFromDomain(player domain.Player) playerResponse {
 	}
 }
 
+func cardCellResponseFromDomain(cell domain.BingoCardCell) cardCellResponse {
+	return cardCellResponse{
+		ID:          cell.ID,
+		RowIndex:    cell.RowIndex,
+		ColIndex:    cell.ColIndex,
+		Word:        cell.Word,
+		IsFreeSpace: cell.IsFreeSpace,
+		MarkedAt:    cell.MarkedAt,
+	}
+}
+
 func cardResponseFromDomain(card domain.BingoCard) cardResponse {
 	cells := make([]cardCellResponse, 0, len(card.Cells))
 	for _, cell := range card.Cells {
-		cells = append(cells, cardCellResponse{
-			ID:          cell.ID,
-			RowIndex:    cell.RowIndex,
-			ColIndex:    cell.ColIndex,
-			Word:        cell.Word,
-			IsFreeSpace: cell.IsFreeSpace,
-			MarkedAt:    cell.MarkedAt,
-		})
+		cells = append(cells, cardCellResponseFromDomain(cell))
 	}
 
 	return cardResponse{
@@ -293,5 +512,92 @@ func cardResponseFromDomain(card domain.BingoCard) cardResponse {
 		Seed:      card.Seed,
 		Cells:     cells,
 		CreatedAt: card.CreatedAt,
+	}
+}
+
+func calledWordResponseFromDomain(calledWord domain.CalledWord) calledWordResponse {
+	return calledWordResponse{
+		ID:             calledWord.ID,
+		GameRunID:      calledWord.GameRunID,
+		WordSetWordID:  calledWord.WordSetWordID,
+		Word:           calledWord.Word,
+		CalledByUserID: calledWord.CalledByUserID,
+		Sequence:       calledWord.Sequence,
+		CalledAt:       calledWord.CalledAt,
+		CreatedAt:      calledWord.CreatedAt,
+	}
+}
+
+func claimResponseFromDomain(claim domain.BingoClaim) claimResponse {
+	validationResult := claim.ValidationResult
+	if len(validationResult) == 0 {
+		validationResult = json.RawMessage(`{}`)
+	}
+
+	return claimResponse{
+		ID:               claim.ID,
+		GameRunID:        claim.GameRunID,
+		PlayerID:         claim.PlayerID,
+		Pattern:          claim.Pattern,
+		Status:           claim.Status,
+		ValidationResult: validationResult,
+		ClaimedAt:        claim.ClaimedAt,
+		ReviewedByUserID: claim.ReviewedByUserID,
+		ReviewedAt:       claim.ReviewedAt,
+		CreatedAt:        claim.CreatedAt,
+		UpdatedAt:        claim.UpdatedAt,
+	}
+}
+
+func claimSubmissionResponseFromDomain(result game.BingoClaimResult) claimSubmissionResponse {
+	response := claimSubmissionResponse{
+		Claim: claimResponseFromDomain(result.Claim),
+	}
+	if result.Winner != nil {
+		winner := winnerResponseFromDomain(*result.Winner)
+		response.Winner = &winner
+	}
+
+	return response
+}
+
+func winnerResponseFromDomain(winner domain.Winner) winnerResponse {
+	return winnerResponse{
+		ID:          winner.ID,
+		GameRunID:   winner.GameRunID,
+		PlayerID:    winner.PlayerID,
+		ClaimID:     winner.ClaimID,
+		Placement:   winner.Placement,
+		Pattern:     winner.Pattern,
+		ConfirmedAt: winner.ConfirmedAt,
+		CreatedAt:   winner.CreatedAt,
+	}
+}
+
+func gameSummaryResponseFromDomain(summary domain.GameSummary) gameSummaryResponse {
+	claims := make([]claimResponse, 0, len(summary.Claims))
+	for _, claim := range summary.Claims {
+		claims = append(claims, claimResponseFromDomain(claim))
+	}
+
+	winners := make([]winnerResponse, 0, len(summary.Winners))
+	for _, winner := range summary.Winners {
+		winners = append(winners, winnerResponseFromDomain(winner))
+	}
+
+	var currentWord *calledWordResponse
+	if summary.CurrentWord != nil {
+		word := calledWordResponseFromDomain(*summary.CurrentWord)
+		currentWord = &word
+	}
+
+	return gameSummaryResponse{
+		GameRun:         gameRunResponseFromDomain(game.GameRunWithCounts{GameRun: summary.GameRun}),
+		PlayerCount:     summary.PlayerCount,
+		CalledWordCount: summary.CalledWordCount,
+		CurrentWord:     currentWord,
+		Claims:          claims,
+		Winners:         winners,
+		Status:          summary.Status,
 	}
 }

@@ -18,11 +18,18 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/api/v1/version", getOnly(s.version))
 	mux.HandleFunc("POST /api/v1/games", s.createGame)
 	mux.HandleFunc("GET /api/v1/games/{gameID}", s.getGame)
+	mux.HandleFunc("POST /api/v1/games/{gameID}/start", s.startGame)
+	mux.HandleFunc("POST /api/v1/games/{gameID}/calls", s.callNextWord)
+	mux.HandleFunc("GET /api/v1/games/{gameID}/calls", s.listCalledWords)
 	mux.HandleFunc("POST /api/v1/games/{gameID}/allowed-players", s.addAllowedPlayer)
 	mux.HandleFunc("GET /api/v1/games/{gameID}/allowed-players", s.listAllowedPlayers)
 	mux.HandleFunc("POST /api/v1/games/{gameID}/players", s.joinPlayer)
 	mux.HandleFunc("POST /api/v1/games/{gameID}/players/{playerID}/card", s.assignPlayerCard)
 	mux.HandleFunc("GET /api/v1/games/{gameID}/players/{playerID}/card", s.getPlayerCard)
+	mux.HandleFunc("PATCH /api/v1/games/{gameID}/players/{playerID}/card/cells/{cellID}", s.markCardCell)
+	mux.HandleFunc("POST /api/v1/games/{gameID}/claims", s.submitBingoClaim)
+	mux.HandleFunc("GET /api/v1/games/{gameID}/claims", s.listBingoClaims)
+	mux.HandleFunc("GET /api/v1/games/{gameID}/summary", s.getGameSummary)
 
 	return s.recoverPanic(s.withRequestID(s.withCORS(s.logRequests(mux))))
 }
