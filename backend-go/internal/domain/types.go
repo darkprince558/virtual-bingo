@@ -140,3 +140,37 @@ type GameSummary struct {
 	CalledWords     []CalledWord
 	Status          string
 }
+
+type GameEvent struct {
+	ID        string
+	GameRunID string
+	Type      string
+	EntityID  *string
+	Payload   json.RawMessage
+	Sequence  int64
+	CreatedAt time.Time
+}
+
+type HostSnapshot struct {
+	GameRun     GameRun
+	Status      string
+	CurrentWord *CalledWord
+	Pattern     string
+	PlayerCount int
+	Players     []Player
+	CalledWords []CalledWord
+	Claims      []BingoClaim
+	Winners     []Winner
+}
+
+type PlayerSnapshot struct {
+	GameRun     GameRun
+	Status      string
+	CurrentWord *CalledWord
+	Pattern     string
+	Player      Player
+	Card        *BingoCard
+	CalledWords []CalledWord
+	Claims      []BingoClaim
+	Winners     []Winner
+}

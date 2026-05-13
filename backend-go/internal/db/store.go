@@ -74,7 +74,13 @@ func (s *Store) CreateGameRun(ctx context.Context, params CreateGameRunParams) (
 		status = "draft"
 	}
 
-	row := s.pool.QueryRow(ctx, `
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.GameRun{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx, `
 		INSERT INTO game_runs (
 			template_id,
 			host_user_id,
@@ -91,6 +97,13 @@ func (s *Store) CreateGameRun(ctx context.Context, params CreateGameRunParams) (
 
 	run, err := scanGameRun(row)
 	if err != nil {
+		return domain.GameRun{}, mapWriteError(err)
+	}
+
+	if _, err := insertOutboxEventInTx(ctx, tx, run.ID, "game.created", &run.ID, map[string]any{"code": run.Code, "status": run.Status}); err != nil {
+		return domain.GameRun{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return domain.GameRun{}, mapWriteError(err)
 	}
 
@@ -186,6 +199,9 @@ func (s *Store) TransitionGameRunStatus(ctx context.Context, params GameStatusTr
 		payload := params.Payload
 		if payload == nil {
 			payload = map[string]any{"status": run.Status}
+		}
+		if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, params.EventType, &run.ID, payload); err != nil {
+			return domain.GameRun{}, err
 		}
 		if err := recordAuditEventInTx(ctx, tx, audit.Event{
 			GameRunID:   &params.GameRunID,
@@ -302,7 +318,17 @@ func (s *Store) CreatePlayer(ctx context.Context, params CreatePlayerParams) (do
 		state = "joined"
 	}
 
-	row := s.pool.QueryRow(ctx, `
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.Player{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := getGameRunForUpdate(ctx, tx, params.GameRunID); err != nil {
+		return domain.Player{}, mapWriteError(err)
+	}
+
+	row := tx.QueryRow(ctx, `
 		INSERT INTO players (game_run_id, user_id, email, display_name, connection_state, state)
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id::text, game_run_id::text, user_id::text, email, display_name, connection_state, state, joined_at, last_seen_at, created_at, updated_at
@@ -310,6 +336,13 @@ func (s *Store) CreatePlayer(ctx context.Context, params CreatePlayerParams) (do
 
 	player, err := scanPlayer(row)
 	if err != nil {
+		return domain.Player{}, mapWriteError(err)
+	}
+
+	if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "player.joined", &player.ID, map[string]any{"playerId": player.ID, "email": player.Email, "displayName": player.DisplayName}); err != nil {
+		return domain.Player{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return domain.Player{}, mapWriteError(err)
 	}
 
@@ -398,6 +431,10 @@ func (s *Store) CreateCalledWord(ctx context.Context, params CreateCalledWordPar
 		return domain.CalledWord{}, mapWriteError(err)
 	}
 
+	if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "word.called", &calledWord.ID, map[string]any{"word": calledWord.Word, "sequence": calledWord.Sequence}); err != nil {
+		return domain.CalledWord{}, err
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return domain.CalledWord{}, mapWriteError(err)
 	}
@@ -464,6 +501,10 @@ func (s *Store) CreateCard(ctx context.Context, params CreateCardParams) (domain
 	}
 	defer tx.Rollback(ctx)
 
+	if _, err := getGameRunForUpdate(ctx, tx, params.GameRunID); err != nil {
+		return domain.BingoCard{}, mapWriteError(err)
+	}
+
 	cardRow := tx.QueryRow(ctx, `
 		INSERT INTO bingo_cards (game_run_id, player_id, seed)
 		VALUES ($1, $2, $3)
@@ -488,6 +529,10 @@ func (s *Store) CreateCard(ctx context.Context, params CreateCardParams) (domain
 			return domain.BingoCard{}, err
 		}
 		card.Cells = append(card.Cells, createdCell)
+	}
+
+	if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "card.assigned", &card.ID, map[string]any{"cardId": card.ID, "playerId": params.PlayerID}); err != nil {
+		return domain.BingoCard{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -565,7 +610,17 @@ type SetCardCellMarkedParams struct {
 }
 
 func (s *Store) SetCardCellMarked(ctx context.Context, params SetCardCellMarkedParams) (domain.BingoCardCell, error) {
-	row := s.pool.QueryRow(ctx, `
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.BingoCardCell{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := getGameRunForUpdate(ctx, tx, params.GameRunID); err != nil {
+		return domain.BingoCardCell{}, mapWriteError(err)
+	}
+
+	row := tx.QueryRow(ctx, `
 		UPDATE bingo_card_cells AS cell
 		SET marked_at = CASE WHEN $4 THEN now() ELSE NULL END
 		FROM bingo_cards AS card
@@ -576,7 +631,19 @@ func (s *Store) SetCardCellMarked(ctx context.Context, params SetCardCellMarkedP
 		RETURNING cell.id::text, cell.card_id::text, cell.row_index, cell.col_index, cell.word, cell.is_free_space, cell.marked_at, cell.created_at
 	`, params.GameRunID, params.PlayerID, params.CellID, params.Marked)
 
-	return scanBingoCardCell(row)
+	cell, err := scanBingoCardCell(row)
+	if err != nil {
+		return domain.BingoCardCell{}, err
+	}
+
+	if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "card.cell_marked", &cell.ID, map[string]any{"cellId": cell.ID, "playerId": params.PlayerID, "marked": params.Marked}); err != nil {
+		return domain.BingoCardCell{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.BingoCardCell{}, mapWriteError(err)
+	}
+
+	return cell, nil
 }
 
 type CreateBingoClaimParams struct {
@@ -767,6 +834,13 @@ func (s *Store) SubmitBingoClaimTx(ctx context.Context, params SubmitBingoClaimT
 		},
 	}
 
+	if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "claim.submitted", &claim.ID, map[string]any{"playerId": params.PlayerID, "pattern": params.Pattern}); err != nil {
+		return SubmitBingoClaimTxResult{}, err
+	}
+	if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "claim.validated", &claim.ID, map[string]any{"status": claim.Status, "valid": decision.Valid}); err != nil {
+		return SubmitBingoClaimTxResult{}, err
+	}
+
 	if err := recordAuditEventInTx(ctx, tx, audit.Event{GameRunID: &params.GameRunID, EventType: "claim.submitted", EntityType: "bingo_claim", EntityID: &claim.ID, Payload: map[string]any{"playerId": params.PlayerID, "pattern": params.Pattern}}); err != nil {
 		return SubmitBingoClaimTxResult{}, err
 	}
@@ -808,6 +882,9 @@ func (s *Store) SubmitBingoClaimTx(ctx context.Context, params SubmitBingoClaimT
 				}
 				result.Winner = &winner
 				result.Events = append(result.Events, events.Event{Type: "winner.created", EntityID: winner.ID, Payload: map[string]any{"gameRunId": params.GameRunID, "playerId": params.PlayerID, "placement": winner.Placement}})
+				if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "winner.created", &winner.ID, map[string]any{"playerId": params.PlayerID, "placement": winner.Placement, "pattern": winner.Pattern}); err != nil {
+					return SubmitBingoClaimTxResult{}, err
+				}
 				if err := recordAuditEventInTx(ctx, tx, audit.Event{GameRunID: &params.GameRunID, EventType: "winner.created", EntityType: "winner", EntityID: &winner.ID, Payload: map[string]any{"playerId": params.PlayerID, "placement": winner.Placement}}); err != nil {
 					return SubmitBingoClaimTxResult{}, err
 				}
@@ -823,6 +900,9 @@ func (s *Store) SubmitBingoClaimTx(ctx context.Context, params SubmitBingoClaimT
 						return SubmitBingoClaimTxResult{}, mapWriteError(err)
 					}
 					result.Events = append(result.Events, events.Event{Type: "game.finished", EntityID: params.GameRunID, Payload: map[string]any{"status": "finished", "reason": "third_winner"}})
+					if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "game.finished", &params.GameRunID, map[string]any{"status": "finished", "reason": "third_winner"}); err != nil {
+						return SubmitBingoClaimTxResult{}, err
+					}
 					if err := recordAuditEventInTx(ctx, tx, audit.Event{GameRunID: &params.GameRunID, EventType: "game.finished", EntityType: "game_run", EntityID: &params.GameRunID, Payload: map[string]any{"reason": "third_winner"}}); err != nil {
 						return SubmitBingoClaimTxResult{}, err
 					}
@@ -948,6 +1028,39 @@ func (s *Store) CountPlayers(ctx context.Context, gameRunID string) (int, error)
 	}
 
 	return count, nil
+}
+
+func (s *Store) ListGameEvents(ctx context.Context, gameRunID string, afterSequence int64, limit int) ([]domain.GameEvent, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, game_run_id::text, type, entity_id::text, payload, sequence, created_at
+		FROM game_event_outbox
+		WHERE game_run_id = $1
+		  AND sequence > $2
+		ORDER BY sequence ASC
+		LIMIT $3
+	`, gameRunID, afterSequence, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	gameEvents := make([]domain.GameEvent, 0)
+	for rows.Next() {
+		event, err := scanGameEvent(rows)
+		if err != nil {
+			return nil, err
+		}
+		gameEvents = append(gameEvents, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return gameEvents, nil
 }
 
 type scanner interface {
@@ -1109,6 +1222,36 @@ func recordAuditEventInTx(ctx context.Context, tx pgx.Tx, event audit.Event) err
 	}
 
 	return nil
+}
+
+func insertOutboxEventInTx(ctx context.Context, tx pgx.Tx, gameRunID, eventType string, entityID *string, payload map[string]any) (domain.GameEvent, error) {
+	if payload == nil {
+		payload = map[string]any{}
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return domain.GameEvent{}, fmt.Errorf("marshal outbox payload: %w", err)
+	}
+
+	row := tx.QueryRow(ctx, `
+		INSERT INTO game_event_outbox (game_run_id, type, entity_id, payload, sequence)
+		VALUES (
+			$1,
+			$2,
+			$3,
+			$4,
+			(SELECT COALESCE(MAX(sequence), 0) + 1 FROM game_event_outbox WHERE game_run_id = $1)
+		)
+		RETURNING id::text, game_run_id::text, type, entity_id::text, payload, sequence, created_at
+	`, gameRunID, eventType, entityID, payloadJSON)
+
+	event, err := scanGameEvent(row)
+	if err != nil {
+		return domain.GameEvent{}, mapWriteError(err)
+	}
+
+	return event, nil
 }
 
 func statusAllowed(status string, allowed []string) bool {
@@ -1319,6 +1462,29 @@ func scanWinner(row scanner) (domain.Winner, error) {
 
 	winner.ClaimID = nullableStringPtr(claimID)
 	return winner, nil
+}
+
+func scanGameEvent(row scanner) (domain.GameEvent, error) {
+	var event domain.GameEvent
+	var entityID sql.NullString
+	var payload []byte
+
+	err := row.Scan(
+		&event.ID,
+		&event.GameRunID,
+		&event.Type,
+		&entityID,
+		&payload,
+		&event.Sequence,
+		&event.CreatedAt,
+	)
+	if err != nil {
+		return domain.GameEvent{}, mapError(err)
+	}
+
+	event.EntityID = nullableStringPtr(entityID)
+	event.Payload = json.RawMessage(payload)
+	return event, nil
 }
 
 func nullableStringPtr(value sql.NullString) *string {
