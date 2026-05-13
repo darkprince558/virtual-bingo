@@ -19,6 +19,10 @@ type Config struct {
 	AppEnv             string
 	DatabaseURL        string
 	CORSAllowedOrigins []string
+	AzureTenantID      string
+	AzureClientID      string
+	AzureServiceBusNS  string
+	AppInsightsConn    string
 }
 
 func Load() (Config, error) {
@@ -27,6 +31,10 @@ func Load() (Config, error) {
 		AppEnv:             getEnv("APP_ENV", defaultAppEnv),
 		DatabaseURL:        strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		CORSAllowedOrigins: splitCSV(os.Getenv("CORS_ALLOWED_ORIGINS")),
+		AzureTenantID:      strings.TrimSpace(os.Getenv("AZURE_TENANT_ID")),
+		AzureClientID:      strings.TrimSpace(os.Getenv("AZURE_CLIENT_ID")),
+		AzureServiceBusNS:  strings.TrimSpace(os.Getenv("AZURE_SERVICE_BUS_NAMESPACE")),
+		AppInsightsConn:    strings.TrimSpace(os.Getenv("APPLICATIONINSIGHTS_CONNECTION_STRING")),
 	}
 
 	if rawPort := strings.TrimSpace(os.Getenv("PORT")); rawPort != "" {

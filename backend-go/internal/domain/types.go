@@ -21,6 +21,15 @@ type WordSet struct {
 	UpdatedAt time.Time
 }
 
+type WordSetWord struct {
+	ID        string
+	WordSetID string
+	Word      string
+	SortOrder int
+	IsActive  bool
+	CreatedAt time.Time
+}
+
 type GameRun struct {
 	ID               string
 	TemplateID       *string

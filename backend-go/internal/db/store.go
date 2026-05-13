@@ -3,16 +3,24 @@ package db
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/darkprince558/virtual-bingo/backend-go/internal/audit"
+	"github.com/darkprince558/virtual-bingo/backend-go/internal/auth"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/domain"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound = errors.New("not found")
+	ErrConflict = errors.New("conflict")
+)
 
 type Store struct {
 	pool *pgxpool.Pool
@@ -20,6 +28,32 @@ type Store struct {
 
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool}
+}
+
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (domain.User, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id::text, external_subject, display_name, email, role, created_at, updated_at
+		FROM users
+		WHERE lower(email) = lower($1)
+	`, email)
+
+	return scanUser(row)
+}
+
+func (s *Store) UpsertUserFromPrincipal(ctx context.Context, principal auth.Principal) (domain.User, error) {
+	role := roleFromPrincipal(principal)
+	row := s.pool.QueryRow(ctx, `
+		INSERT INTO users (external_subject, display_name, email, role)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT ((lower(email))) DO UPDATE
+		SET external_subject = EXCLUDED.external_subject,
+		    display_name = EXCLUDED.display_name,
+		    role = EXCLUDED.role,
+		    updated_at = now()
+		RETURNING id::text, external_subject, display_name, email, role, created_at, updated_at
+	`, principal.ID, principal.DisplayName, strings.ToLower(principal.Email), role)
+
+	return scanUser(row)
 }
 
 type CreateGameRunParams struct {
@@ -54,7 +88,12 @@ func (s *Store) CreateGameRun(ctx context.Context, params CreateGameRunParams) (
 		RETURNING id::text, template_id::text, host_user_id::text, word_set_id::text, code, name, status, scheduled_start_at, started_at, ended_at, winning_pattern, created_at, updated_at
 	`, params.TemplateID, params.HostUserID, params.WordSetID, params.Code, params.Name, status, params.ScheduledStartAt, params.WinningPattern)
 
-	return scanGameRun(row)
+	run, err := scanGameRun(row)
+	if err != nil {
+		return domain.GameRun{}, mapWriteError(err)
+	}
+
+	return run, nil
 }
 
 func (s *Store) GetGameRun(ctx context.Context, id string) (domain.GameRun, error) {
@@ -86,6 +125,21 @@ func (s *Store) AddAllowedPlayer(ctx context.Context, params AddAllowedPlayerPar
 		RETURNING id::text, game_run_id::text, email, display_name, source, created_at
 	`, params.GameRunID, params.Email, params.DisplayName, source)
 
+	player, err := scanAllowedPlayer(row)
+	if err != nil {
+		return domain.AllowedPlayer{}, mapWriteError(err)
+	}
+
+	return player, nil
+}
+
+func (s *Store) GetAllowedPlayerByEmail(ctx context.Context, gameRunID, email string) (domain.AllowedPlayer, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id::text, game_run_id::text, email, display_name, source, created_at
+		FROM allowed_players
+		WHERE game_run_id = $1 AND lower(email) = lower($2)
+	`, gameRunID, email)
+
 	return scanAllowedPlayer(row)
 }
 
@@ -116,6 +170,19 @@ func (s *Store) ListAllowedPlayers(ctx context.Context, gameRunID string) ([]dom
 	return players, nil
 }
 
+func (s *Store) CountAllowedPlayers(ctx context.Context, gameRunID string) (int, error) {
+	var count int
+	if err := s.pool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM allowed_players
+		WHERE game_run_id = $1
+	`, gameRunID).Scan(&count); err != nil {
+		return 0, err
+	}
+
+	return count, nil
+}
+
 type CreatePlayerParams struct {
 	GameRunID       string
 	UserID          *string
@@ -141,7 +208,49 @@ func (s *Store) CreatePlayer(ctx context.Context, params CreatePlayerParams) (do
 		RETURNING id::text, game_run_id::text, user_id::text, email, display_name, connection_state, state, joined_at, last_seen_at, created_at, updated_at
 	`, params.GameRunID, params.UserID, params.Email, params.DisplayName, connectionState, state)
 
+	player, err := scanPlayer(row)
+	if err != nil {
+		return domain.Player{}, mapWriteError(err)
+	}
+
+	return player, nil
+}
+
+func (s *Store) GetPlayerByGameRunAndEmail(ctx context.Context, gameRunID, email string) (domain.Player, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id::text, game_run_id::text, user_id::text, email, display_name, connection_state, state, joined_at, last_seen_at, created_at, updated_at
+		FROM players
+		WHERE game_run_id = $1 AND lower(email) = lower($2)
+	`, gameRunID, email)
+
 	return scanPlayer(row)
+}
+
+func (s *Store) ListWordSetWords(ctx context.Context, wordSetID string) ([]domain.WordSetWord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, word_set_id::text, word, sort_order, is_active, created_at
+		FROM word_set_words
+		WHERE word_set_id = $1 AND is_active = true
+		ORDER BY sort_order
+	`, wordSetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	words := make([]domain.WordSetWord, 0)
+	for rows.Next() {
+		word, err := scanWordSetWord(rows)
+		if err != nil {
+			return nil, err
+		}
+		words = append(words, word)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return words, nil
 }
 
 type CreateCardParams struct {
@@ -162,7 +271,7 @@ type CreateCardCellParams struct {
 func (s *Store) CreateCard(ctx context.Context, params CreateCardParams) (domain.BingoCard, error) {
 	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
-		return domain.BingoCard{}, err
+		return domain.BingoCard{}, mapWriteError(err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -174,7 +283,7 @@ func (s *Store) CreateCard(ctx context.Context, params CreateCardParams) (domain
 
 	card, err := scanBingoCard(cardRow)
 	if err != nil {
-		return domain.BingoCard{}, err
+		return domain.BingoCard{}, mapWriteError(err)
 	}
 
 	card.Cells = make([]domain.BingoCardCell, 0, len(params.Cells))
@@ -197,6 +306,28 @@ func (s *Store) CreateCard(ctx context.Context, params CreateCardParams) (domain
 	}
 
 	return card, nil
+}
+
+func (s *Store) RecordAuditEvent(ctx context.Context, event audit.Event) error {
+	payload := event.Payload
+	if payload == nil {
+		payload = map[string]any{}
+	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal audit payload: %w", err)
+	}
+
+	_, err = s.pool.Exec(ctx, `
+		INSERT INTO audit_events (game_run_id, actor_user_id, event_type, entity_type, entity_id, payload)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, event.GameRunID, event.ActorUserID, event.EventType, event.EntityType, event.EntityID, payloadJSON)
+	if err != nil {
+		return mapWriteError(err)
+	}
+
+	return nil
 }
 
 func (s *Store) GetPlayerCard(ctx context.Context, playerID string) (domain.BingoCard, error) {
@@ -273,6 +404,29 @@ func scanGameRun(row scanner) (domain.GameRun, error) {
 	run.WinningPattern = nullableStringPtr(winningPattern)
 
 	return run, nil
+}
+
+func scanUser(row scanner) (domain.User, error) {
+	var user domain.User
+	var externalSubject sql.NullString
+
+	err := row.Scan(&user.ID, &externalSubject, &user.DisplayName, &user.Email, &user.Role, &user.CreatedAt, &user.UpdatedAt)
+	if err != nil {
+		return domain.User{}, mapError(err)
+	}
+
+	user.ExternalSubject = nullableStringPtr(externalSubject)
+	return user, nil
+}
+
+func scanWordSetWord(row scanner) (domain.WordSetWord, error) {
+	var word domain.WordSetWord
+	err := row.Scan(&word.ID, &word.WordSetID, &word.Word, &word.SortOrder, &word.IsActive, &word.CreatedAt)
+	if err != nil {
+		return domain.WordSetWord{}, mapError(err)
+	}
+
+	return word, nil
 }
 
 func scanAllowedPlayer(row scanner) (domain.AllowedPlayer, error) {
@@ -364,4 +518,34 @@ func mapError(err error) error {
 	}
 
 	return fmt.Errorf("database query: %w", err)
+}
+
+func mapWriteError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrNotFound
+	}
+
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return ErrConflict
+	}
+
+	return fmt.Errorf("database write: %w", err)
+}
+
+func roleFromPrincipal(principal auth.Principal) string {
+	if auth.HasRole(principal, "admin") {
+		return "admin"
+	}
+	if auth.HasRole(principal, "host") {
+		return "host"
+	}
+	if auth.HasRole(principal, "viewer") {
+		return "viewer"
+	}
+
+	return "player"
 }

@@ -16,12 +16,19 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/healthz", getOnly(healthHandler.Healthz))
 	mux.HandleFunc("/readyz", getOnly(healthHandler.Readyz))
 	mux.HandleFunc("/api/v1/version", getOnly(s.version))
+	mux.HandleFunc("POST /api/v1/games", s.createGame)
+	mux.HandleFunc("GET /api/v1/games/{gameID}", s.getGame)
+	mux.HandleFunc("POST /api/v1/games/{gameID}/allowed-players", s.addAllowedPlayer)
+	mux.HandleFunc("GET /api/v1/games/{gameID}/allowed-players", s.listAllowedPlayers)
+	mux.HandleFunc("POST /api/v1/games/{gameID}/players", s.joinPlayer)
+	mux.HandleFunc("POST /api/v1/games/{gameID}/players/{playerID}/card", s.assignPlayerCard)
+	mux.HandleFunc("GET /api/v1/games/{gameID}/players/{playerID}/card", s.getPlayerCard)
 
-	return s.recoverPanic(s.withCORS(s.logRequests(mux)))
+	return s.recoverPanic(s.withRequestID(s.withCORS(s.logRequests(mux))))
 }
 
 func (s *Server) version(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
+	writeData(w, http.StatusOK, map[string]string{
 		"service": "virtual-bingo-api",
 		"version": apiVersion,
 		"env":     s.cfg.AppEnv,

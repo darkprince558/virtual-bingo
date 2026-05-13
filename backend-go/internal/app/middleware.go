@@ -1,18 +1,34 @@
 package app
 
 import (
+	"context"
 	"net/http"
 	"slices"
 	"time"
 )
 
+type responseStatusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *responseStatusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+type requestIDContextKey struct{}
+
 func (s *Server) logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		next.ServeHTTP(w, r)
+		recorder := &responseStatusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(recorder, r)
 		s.logger.Info("request completed",
 			"method", r.Method,
 			"path", r.URL.Path,
+			"status", recorder.status,
+			"request_id", requestIDFromContext(r.Context()),
 			"duration_ms", time.Since(start).Milliseconds(),
 		)
 	})
@@ -50,6 +66,28 @@ func (s *Server) withCORS(next http.Handler) http.Handler {
 	})
 }
 
+func (s *Server) withRequestID(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestID := r.Header.Get(requestIDHeader)
+		if requestID == "" {
+			requestID = generateRequestID()
+		}
+
+		w.Header().Set(requestIDHeader, requestID)
+		ctx := context.WithValue(r.Context(), requestIDContextKey{}, requestID)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func (s *Server) originAllowed(origin string) bool {
 	return slices.Contains(s.cfg.CORSAllowedOrigins, "*") || slices.Contains(s.cfg.CORSAllowedOrigins, origin)
+}
+
+func requestIDFromContext(ctx context.Context) string {
+	requestID, ok := ctx.Value(requestIDContextKey{}).(string)
+	if !ok {
+		return ""
+	}
+
+	return requestID
 }
