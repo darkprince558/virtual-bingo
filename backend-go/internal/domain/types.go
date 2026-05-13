@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 type User struct {
 	ID              string
@@ -31,19 +34,20 @@ type WordSetWord struct {
 }
 
 type GameRun struct {
-	ID               string
-	TemplateID       *string
-	HostUserID       string
-	WordSetID        *string
-	Code             string
-	Name             string
-	Status           string
-	ScheduledStartAt *time.Time
-	StartedAt        *time.Time
-	EndedAt          *time.Time
-	WinningPattern   *string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	ID                  string
+	TemplateID          *string
+	HostUserID          string
+	WordSetID           *string
+	Code                string
+	Name                string
+	Status              string
+	ScheduledStartAt    *time.Time
+	StartedAt           *time.Time
+	EndedAt             *time.Time
+	CurrentCalledWordID *string
+	WinningPattern      *string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 type AllowedPlayer struct {
@@ -87,4 +91,50 @@ type BingoCardCell struct {
 	IsFreeSpace bool
 	MarkedAt    *time.Time
 	CreatedAt   time.Time
+}
+
+type CalledWord struct {
+	ID             string
+	GameRunID      string
+	WordSetWordID  *string
+	Word           string
+	CalledByUserID *string
+	Sequence       int
+	CalledAt       time.Time
+	CreatedAt      time.Time
+}
+
+type BingoClaim struct {
+	ID               string
+	GameRunID        string
+	PlayerID         string
+	Pattern          string
+	Status           string
+	ValidationResult json.RawMessage
+	ClaimedAt        time.Time
+	ReviewedByUserID *string
+	ReviewedAt       *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type Winner struct {
+	ID          string
+	GameRunID   string
+	PlayerID    string
+	ClaimID     *string
+	Placement   int
+	Pattern     string
+	ConfirmedAt time.Time
+	CreatedAt   time.Time
+}
+
+type GameSummary struct {
+	GameRun         GameRun
+	PlayerCount     int
+	CalledWordCount int
+	CurrentWord     *CalledWord
+	Claims          []BingoClaim
+	Winners         []Winner
+	Status          string
 }
