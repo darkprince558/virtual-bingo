@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"database/sql"
@@ -520,6 +521,88 @@ func TestAPIWinnerHardening(t *testing.T) {
 	}
 }
 
+func TestAPIRealtimeSnapshotsOutboxAndSSE(t *testing.T) {
+	ctx := context.Background()
+	databaseURL := createTestDatabase(t)
+	if err := db.RunMigrationsFromPath(databaseURL, "../db/migrations", db.MigrationUp); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	pool, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	defer pool.Close()
+
+	wordSetID := insertAPIWordSet(t, ctx, pool)
+	handler := NewServer(config.Config{AppEnv: "test", DatabaseURL: databaseURL}, testLogger(), pool).Handler
+	gameID := createAPIGame(t, handler, "Realtime Backbone Game", "REALTIME-BACKBONE", wordSetID, nil)
+	playerID, card := allowJoinAndAssignCard(t, handler, gameID, "realtime@example.local", "Realtime Player")
+
+	if resp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/start", nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected start 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+	firstCallResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/calls", nil)
+	if firstCallResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected first call 201, got %d: %s", firstCallResp.StatusCode, firstCallResp.Body)
+	}
+	markCell := firstNonFreeCell(t, card.Cells)
+	if resp := doRequest(t, handler, http.MethodPatch, "/api/v1/games/"+gameID+"/players/"+playerID+"/card/cells/"+markCell.ID, map[string]any{"marked": true}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected mark 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+	for index := 0; index < 25; index++ {
+		resp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/calls", nil)
+		if resp.StatusCode != http.StatusCreated {
+			t.Fatalf("expected remaining call %d to return 201, got %d: %s", index+1, resp.StatusCode, resp.Body)
+		}
+	}
+	validClaimResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/claims", map[string]any{
+		"playerId": playerID,
+		"pattern":  "single_line",
+	})
+	if validClaimResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected valid claim 201, got %d: %s", validClaimResp.StatusCode, validClaimResp.Body)
+	}
+
+	hostSnapshotResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/host-snapshot", nil)
+	if hostSnapshotResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected host snapshot 200, got %d: %s", hostSnapshotResp.StatusCode, hostSnapshotResp.Body)
+	}
+	hostSnapshot := hostSnapshotFromData(t, hostSnapshotResp.Body)
+	if hostSnapshot.Status != "live" || hostSnapshot.PlayerCount != 1 || len(hostSnapshot.Players) != 1 || len(hostSnapshot.Claims) != 1 || len(hostSnapshot.Winners) != 1 || hostSnapshot.CurrentWord == nil {
+		t.Fatalf("unexpected host snapshot: %+v", hostSnapshot)
+	}
+
+	playerSnapshotResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/players/"+playerID+"/snapshot", nil)
+	if playerSnapshotResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected player snapshot 200, got %d: %s", playerSnapshotResp.StatusCode, playerSnapshotResp.Body)
+	}
+	playerSnapshot := playerSnapshotFromData(t, playerSnapshotResp.Body)
+	if playerSnapshot.Status != "live" || playerSnapshot.Player.ID != playerID || playerSnapshot.Card == nil || len(playerSnapshot.Card.Cells) != 25 || len(playerSnapshot.Claims) != 1 || len(playerSnapshot.Winners) != 1 {
+		t.Fatalf("unexpected player snapshot: %+v", playerSnapshot)
+	}
+
+	events := gameEventsFromDB(t, ctx, pool, gameID)
+	assertEventTypes(t, events, []string{"game.created", "player.joined", "card.assigned", "game.started", "word.called", "card.cell_marked", "claim.submitted", "claim.validated", "winner.created"})
+	for index := 1; index < len(events); index++ {
+		if events[index].Sequence <= events[index-1].Sequence {
+			t.Fatalf("expected ordered outbox sequences, got %+v", events)
+		}
+	}
+
+	server := httptest.NewServer(handler)
+	defer server.Close()
+	streamed := readSSEEvents(t, server.URL+"/api/v1/games/"+gameID+"/events", "", 4)
+	if len(streamed) != 4 || streamed[0].Sequence != 1 || streamed[1].Sequence != 2 {
+		t.Fatalf("expected initial SSE stream from sequence 1, got %+v", streamed)
+	}
+	resumed := readSSEEvents(t, server.URL+"/api/v1/games/"+gameID+"/events", "2", 2)
+	if len(resumed) != 2 || resumed[0].Sequence != 3 {
+		t.Fatalf("expected resumed SSE stream after sequence 2, got %+v", resumed)
+	}
+	readSSEHeartbeat(t, server.URL+"/api/v1/games/"+gameID+"/events?heartbeatMs=25", events[len(events)-1].Sequence)
+}
+
 type testResponse struct {
 	StatusCode int
 	Body       string
@@ -670,6 +753,32 @@ type apiPlayer struct {
 	State string `json:"state"`
 }
 
+type apiHostSnapshot struct {
+	Status      string          `json:"status"`
+	PlayerCount int             `json:"playerCount"`
+	CurrentWord *apiCalledWord  `json:"currentWord"`
+	Players     []apiPlayer     `json:"players"`
+	CalledWords []apiCalledWord `json:"calledWords"`
+	Claims      []apiClaim      `json:"claims"`
+	Winners     []apiWinner     `json:"winners"`
+}
+
+type apiPlayerSnapshot struct {
+	Status      string          `json:"status"`
+	CurrentWord *apiCalledWord  `json:"currentWord"`
+	Player      apiPlayer       `json:"player"`
+	Card        *apiCard        `json:"card"`
+	CalledWords []apiCalledWord `json:"calledWords"`
+	Claims      []apiClaim      `json:"claims"`
+	Winners     []apiWinner     `json:"winners"`
+}
+
+type apiGameEvent struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Sequence int64  `json:"sequence"`
+}
+
 func cellsFromData(t *testing.T, body string) []apiCardCell {
 	t.Helper()
 
@@ -758,6 +867,32 @@ func summaryFromData(t *testing.T, body string) apiSummary {
 	}
 	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
 		t.Fatalf("decode summary response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func hostSnapshotFromData(t *testing.T, body string) apiHostSnapshot {
+	t.Helper()
+
+	var envelope struct {
+		Data apiHostSnapshot `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode host snapshot response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func playerSnapshotFromData(t *testing.T, body string) apiPlayerSnapshot {
+	t.Helper()
+
+	var envelope struct {
+		Data apiPlayerSnapshot `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode player snapshot response: %v", err)
 	}
 
 	return envelope.Data
@@ -993,6 +1128,136 @@ func insertAPIWordSet(t *testing.T, ctx context.Context, pool *db.Pool) string {
 	}
 
 	return wordSetID
+}
+
+func gameEventsFromDB(t *testing.T, ctx context.Context, pool *db.Pool, gameID string) []apiGameEvent {
+	t.Helper()
+
+	rows, err := pool.Query(ctx, `
+		SELECT id::text, type, sequence
+		FROM game_event_outbox
+		WHERE game_run_id = $1
+		ORDER BY sequence ASC
+	`, gameID)
+	if err != nil {
+		t.Fatalf("query game event outbox: %v", err)
+	}
+	defer rows.Close()
+
+	events := make([]apiGameEvent, 0)
+	for rows.Next() {
+		var event apiGameEvent
+		if err := rows.Scan(&event.ID, &event.Type, &event.Sequence); err != nil {
+			t.Fatalf("scan game event: %v", err)
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate game events: %v", err)
+	}
+
+	return events
+}
+
+func assertEventTypes(t *testing.T, events []apiGameEvent, expected []string) {
+	t.Helper()
+
+	seen := make(map[string]bool, len(events))
+	for _, event := range events {
+		seen[event.Type] = true
+	}
+	for _, eventType := range expected {
+		if !seen[eventType] {
+			t.Fatalf("expected event type %s in %+v", eventType, events)
+		}
+	}
+}
+
+func readSSEEvents(t *testing.T, url string, lastEventID string, limit int) []apiGameEvent {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("create SSE request: %v", err)
+	}
+	req.Header.Set("X-Dev-User-Email", "host@example.local")
+	req.Header.Set("X-Dev-User-Role", "host")
+	if lastEventID != "" {
+		req.Header.Set("Last-Event-ID", lastEventID)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open SSE stream: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected SSE status 200, got %d: %s", resp.StatusCode, string(body))
+	}
+
+	events := make([]apiGameEvent, 0, limit)
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		var event apiGameEvent
+		if err := json.Unmarshal([]byte(strings.TrimPrefix(line, "data: ")), &event); err != nil {
+			t.Fatalf("decode SSE event: %v", err)
+		}
+		events = append(events, event)
+		if len(events) == limit {
+			cancel()
+			return events
+		}
+	}
+	if err := scanner.Err(); err != nil && ctx.Err() == nil {
+		t.Fatalf("scan SSE stream: %v", err)
+	}
+
+	return events
+}
+
+func readSSEHeartbeat(t *testing.T, url string, lastSequence int64) {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("create heartbeat SSE request: %v", err)
+	}
+	req.Header.Set("X-Dev-User-Email", "host@example.local")
+	req.Header.Set("X-Dev-User-Role", "host")
+	req.Header.Set("Last-Event-ID", fmt.Sprintf("%d", lastSequence))
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("open heartbeat SSE stream: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected heartbeat SSE status 200, got %d: %s", resp.StatusCode, string(body))
+	}
+
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		if scanner.Text() == ": heartbeat" {
+			cancel()
+			return
+		}
+	}
+	if err := scanner.Err(); err != nil && ctx.Err() == nil {
+		t.Fatalf("scan heartbeat SSE stream: %v", err)
+	}
+	t.Fatal("expected heartbeat comment before stream closed")
 }
 
 func quoteIdentifier(value string) string {
