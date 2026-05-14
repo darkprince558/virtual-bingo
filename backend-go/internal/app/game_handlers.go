@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/auth"
@@ -372,6 +374,143 @@ func (s *Server) getGameSummary(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, gameSummaryResponseFromDomain(summary))
 }
 
+func (s *Server) getHostSnapshot(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	snapshot, err := s.service.GetHostSnapshot(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, hostSnapshotResponseFromDomain(snapshot))
+}
+
+func (s *Server) getPlayerSnapshot(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	snapshot, err := s.service.GetPlayerSnapshot(r.Context(), principal, r.PathValue("gameID"), r.PathValue("playerID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, playerSnapshotResponseFromDomain(snapshot))
+}
+
+func (s *Server) streamGameEvents(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+	if _, err := s.service.Authenticate(r); err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeAPIError(w, http.StatusInternalServerError, "streaming_unsupported", "response writer does not support streaming")
+		return
+	}
+
+	afterSequence := parseLastEventSequence(r)
+	pollInterval := 500 * time.Millisecond
+	heartbeatInterval := 15 * time.Second
+	if value := r.URL.Query().Get("heartbeatMs"); value != "" {
+		if parsed, err := strconv.Atoi(value); err == nil && parsed >= 25 {
+			heartbeatInterval = time.Duration(parsed) * time.Millisecond
+		}
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.WriteHeader(http.StatusOK)
+
+	pollTicker := time.NewTicker(pollInterval)
+	defer pollTicker.Stop()
+	heartbeatTicker := time.NewTicker(heartbeatInterval)
+	defer heartbeatTicker.Stop()
+
+	writeSSEComment(w, "connected")
+	flusher.Flush()
+
+	for {
+		events, err := s.service.ListGameEvents(r.Context(), r.PathValue("gameID"), afterSequence, 100)
+		if err != nil {
+			writeSSEComment(w, "error")
+			flusher.Flush()
+			return
+		}
+		for _, event := range events {
+			if err := writeSSEEvent(w, eventResponseFromDomain(event)); err != nil {
+				return
+			}
+			afterSequence = event.Sequence
+		}
+		if len(events) > 0 {
+			flusher.Flush()
+			continue
+		}
+
+		select {
+		case <-r.Context().Done():
+			return
+		case <-pollTicker.C:
+		case <-heartbeatTicker.C:
+			writeSSEComment(w, "heartbeat")
+			flusher.Flush()
+		}
+	}
+}
+
+func parseLastEventSequence(r *http.Request) int64 {
+	value := r.Header.Get("Last-Event-ID")
+	if value == "" {
+		value = r.URL.Query().Get("lastEventId")
+	}
+	if value == "" {
+		return 0
+	}
+
+	sequence, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || sequence < 0 {
+		return 0
+	}
+
+	return sequence
+}
+
+func writeSSEComment(w http.ResponseWriter, value string) {
+	_, _ = fmt.Fprintf(w, ": %s\n\n", value)
+}
+
+func writeSSEEvent(w http.ResponseWriter, event eventResponse) error {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return err
+	}
+
+	_, err = fmt.Fprintf(w, "id: %d\nevent: %s\ndata: %s\n\n", event.Sequence, event.Type, payload)
+	return err
+}
+
 type gameRunResponse struct {
 	ID                  string     `json:"id"`
 	TemplateID          *string    `json:"templateId,omitempty"`
@@ -480,6 +619,40 @@ type gameSummaryResponse struct {
 	Players         []playerResponse     `json:"players"`
 	CalledWords     []calledWordResponse `json:"calledWords"`
 	Status          string               `json:"status"`
+}
+
+type hostSnapshotResponse struct {
+	GameRun        gameRunResponse      `json:"gameRun"`
+	Status         string               `json:"status"`
+	CurrentWord    *calledWordResponse  `json:"currentWord,omitempty"`
+	WinningPattern string               `json:"winningPattern"`
+	PlayerCount    int                  `json:"playerCount"`
+	Players        []playerResponse     `json:"players"`
+	CalledWords    []calledWordResponse `json:"calledWords"`
+	Claims         []claimResponse      `json:"claims"`
+	Winners        []winnerResponse     `json:"winners"`
+}
+
+type playerSnapshotResponse struct {
+	GameRun        gameRunResponse      `json:"gameRun"`
+	Status         string               `json:"status"`
+	CurrentWord    *calledWordResponse  `json:"currentWord,omitempty"`
+	WinningPattern string               `json:"winningPattern"`
+	Player         playerResponse       `json:"player"`
+	Card           *cardResponse        `json:"card,omitempty"`
+	CalledWords    []calledWordResponse `json:"calledWords"`
+	Claims         []claimResponse      `json:"claims"`
+	Winners        []winnerResponse     `json:"winners"`
+}
+
+type eventResponse struct {
+	ID        string          `json:"id"`
+	GameRunID string          `json:"gameRunId"`
+	Type      string          `json:"type"`
+	EntityID  *string         `json:"entityId,omitempty"`
+	Payload   json.RawMessage `json:"payload"`
+	Sequence  int64           `json:"sequence"`
+	CreatedAt time.Time       `json:"createdAt"`
 }
 
 func gameRunResponseFromDomain(run game.GameRunWithCounts) gameRunResponse {
@@ -648,5 +821,97 @@ func gameSummaryResponseFromDomain(summary domain.GameSummary) gameSummaryRespon
 		Players:         players,
 		CalledWords:     calledWords,
 		Status:          summary.Status,
+	}
+}
+
+func hostSnapshotResponseFromDomain(snapshot domain.HostSnapshot) hostSnapshotResponse {
+	players := make([]playerResponse, 0, len(snapshot.Players))
+	for _, player := range snapshot.Players {
+		players = append(players, playerResponseFromDomain(player))
+	}
+	calledWords := make([]calledWordResponse, 0, len(snapshot.CalledWords))
+	for _, word := range snapshot.CalledWords {
+		calledWords = append(calledWords, calledWordResponseFromDomain(word))
+	}
+	claims := make([]claimResponse, 0, len(snapshot.Claims))
+	for _, claim := range snapshot.Claims {
+		claims = append(claims, claimResponseFromDomain(claim))
+	}
+	winners := make([]winnerResponse, 0, len(snapshot.Winners))
+	for _, winner := range snapshot.Winners {
+		winners = append(winners, winnerResponseFromDomain(winner))
+	}
+
+	var currentWord *calledWordResponse
+	if snapshot.CurrentWord != nil {
+		word := calledWordResponseFromDomain(*snapshot.CurrentWord)
+		currentWord = &word
+	}
+
+	return hostSnapshotResponse{
+		GameRun:        gameRunResponseFromDomain(game.GameRunWithCounts{GameRun: snapshot.GameRun}),
+		Status:         snapshot.Status,
+		CurrentWord:    currentWord,
+		WinningPattern: snapshot.Pattern,
+		PlayerCount:    snapshot.PlayerCount,
+		Players:        players,
+		CalledWords:    calledWords,
+		Claims:         claims,
+		Winners:        winners,
+	}
+}
+
+func playerSnapshotResponseFromDomain(snapshot domain.PlayerSnapshot) playerSnapshotResponse {
+	calledWords := make([]calledWordResponse, 0, len(snapshot.CalledWords))
+	for _, word := range snapshot.CalledWords {
+		calledWords = append(calledWords, calledWordResponseFromDomain(word))
+	}
+	claims := make([]claimResponse, 0, len(snapshot.Claims))
+	for _, claim := range snapshot.Claims {
+		claims = append(claims, claimResponseFromDomain(claim))
+	}
+	winners := make([]winnerResponse, 0, len(snapshot.Winners))
+	for _, winner := range snapshot.Winners {
+		winners = append(winners, winnerResponseFromDomain(winner))
+	}
+
+	var currentWord *calledWordResponse
+	if snapshot.CurrentWord != nil {
+		word := calledWordResponseFromDomain(*snapshot.CurrentWord)
+		currentWord = &word
+	}
+	var card *cardResponse
+	if snapshot.Card != nil {
+		response := cardResponseFromDomain(*snapshot.Card)
+		card = &response
+	}
+
+	return playerSnapshotResponse{
+		GameRun:        gameRunResponseFromDomain(game.GameRunWithCounts{GameRun: snapshot.GameRun}),
+		Status:         snapshot.Status,
+		CurrentWord:    currentWord,
+		WinningPattern: snapshot.Pattern,
+		Player:         playerResponseFromDomain(snapshot.Player),
+		Card:           card,
+		CalledWords:    calledWords,
+		Claims:         claims,
+		Winners:        winners,
+	}
+}
+
+func eventResponseFromDomain(event domain.GameEvent) eventResponse {
+	payload := event.Payload
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+
+	return eventResponse{
+		ID:        event.ID,
+		GameRunID: event.GameRunID,
+		Type:      event.Type,
+		EntityID:  event.EntityID,
+		Payload:   payload,
+		Sequence:  event.Sequence,
+		CreatedAt: event.CreatedAt,
 	}
 }

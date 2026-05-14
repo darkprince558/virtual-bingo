@@ -57,6 +57,7 @@ type Store interface {
 	ListPlayers(context.Context, string) ([]domain.Player, error)
 	CountWinners(context.Context, string) (int, error)
 	CountPlayers(context.Context, string) (int, error)
+	ListGameEvents(context.Context, string, int64, int) ([]domain.GameEvent, error)
 	RecordAuditEvent(context.Context, audit.Event) error
 }
 
@@ -697,6 +698,114 @@ func (s *Service) GetGameSummary(ctx context.Context, gameRunID string) (domain.
 	}, nil
 }
 
+func (s *Service) GetHostSnapshot(ctx context.Context, principal auth.Principal, gameRunID string) (domain.HostSnapshot, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return domain.HostSnapshot{}, ErrForbidden
+	}
+
+	summary, err := s.GetGameSummary(ctx, gameRunID)
+	if err != nil {
+		return domain.HostSnapshot{}, err
+	}
+
+	return domain.HostSnapshot{
+		GameRun:     summary.GameRun,
+		Status:      summary.Status,
+		CurrentWord: summary.CurrentWord,
+		Pattern:     winningPatternOrDefault(summary.GameRun),
+		PlayerCount: summary.PlayerCount,
+		Players:     summary.Players,
+		CalledWords: summary.CalledWords,
+		Claims:      summary.Claims,
+		Winners:     summary.Winners,
+	}, nil
+}
+
+func (s *Service) GetPlayerSnapshot(ctx context.Context, principal auth.Principal, gameRunID, playerID string) (domain.PlayerSnapshot, error) {
+	run, err := s.store.GetGameRun(ctx, gameRunID)
+	if err != nil {
+		return domain.PlayerSnapshot{}, mapStoreError(err)
+	}
+
+	players, err := s.store.ListPlayers(ctx, gameRunID)
+	if err != nil {
+		return domain.PlayerSnapshot{}, err
+	}
+
+	var player domain.Player
+	found := false
+	for _, candidate := range players {
+		if candidate.ID == playerID {
+			player = candidate
+			found = true
+			break
+		}
+	}
+	if !found {
+		return domain.PlayerSnapshot{}, ErrNotFound
+	}
+	if !auth.HasRole(principal, "admin", "host") && !strings.EqualFold(principal.Email, player.Email) {
+		return domain.PlayerSnapshot{}, ErrForbidden
+	}
+
+	card, err := s.store.GetPlayerCard(ctx, playerID)
+	if err != nil && !errors.Is(err, db.ErrNotFound) {
+		return domain.PlayerSnapshot{}, mapStoreError(err)
+	}
+	var cardPtr *domain.BingoCard
+	if err == nil {
+		if card.GameRunID != gameRunID {
+			return domain.PlayerSnapshot{}, ErrNotFound
+		}
+		cardPtr = &card
+	}
+
+	calledWords, err := s.store.ListCalledWords(ctx, gameRunID)
+	if err != nil {
+		return domain.PlayerSnapshot{}, err
+	}
+	claims, err := s.store.ListBingoClaims(ctx, gameRunID)
+	if err != nil {
+		return domain.PlayerSnapshot{}, err
+	}
+	playerClaims := make([]domain.BingoClaim, 0)
+	for _, claim := range claims {
+		if claim.PlayerID == playerID {
+			playerClaims = append(playerClaims, claim)
+		}
+	}
+	winners, err := s.store.ListWinners(ctx, gameRunID)
+	if err != nil {
+		return domain.PlayerSnapshot{}, err
+	}
+
+	var currentWord *domain.CalledWord
+	if len(calledWords) > 0 {
+		word := calledWords[len(calledWords)-1]
+		currentWord = &word
+	}
+
+	return domain.PlayerSnapshot{
+		GameRun:     run,
+		Status:      run.Status,
+		CurrentWord: currentWord,
+		Pattern:     winningPatternOrDefault(run),
+		Player:      player,
+		Card:        cardPtr,
+		CalledWords: calledWords,
+		Claims:      playerClaims,
+		Winners:     winners,
+	}, nil
+}
+
+func (s *Service) ListGameEvents(ctx context.Context, gameRunID string, afterSequence int64, limit int) ([]domain.GameEvent, error) {
+	if _, err := s.store.GetGameRun(ctx, gameRunID); err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	return s.store.ListGameEvents(ctx, gameRunID, afterSequence, limit)
+}
+
 func (s *Service) Authenticate(r *http.Request) (auth.Principal, error) {
 	return s.authenticator.Authenticate(r)
 }
@@ -753,6 +862,14 @@ func enforceAllowedPattern(run domain.GameRun, pattern string) error {
 	}
 
 	return nil
+}
+
+func winningPatternOrDefault(run domain.GameRun) string {
+	if run.WinningPattern == nil || strings.TrimSpace(*run.WinningPattern) == "" {
+		return bingo.PatternSingleLine
+	}
+
+	return bingo.NormalizePattern(*run.WinningPattern)
 }
 
 func bingoCellsFromDomain(cells []domain.BingoCardCell) []bingo.Cell {
