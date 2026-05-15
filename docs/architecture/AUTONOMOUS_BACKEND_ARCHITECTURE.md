@@ -609,18 +609,18 @@ Recommended Azure primitive:
 - `POST /api/v1/game-runs/{id}/rewards/retry`
 - `POST /api/v1/game-runs/{id}/summary/email`
 
-## Revised MVP Order
+## Revised Production V1 Order
 
-The old MVP was "make live bingo real." The new MVP should be "make one automated weekly run real."
+The old prototype mindset was "make live bingo real." The Production V1 target is "make one automated weekly run production-ready."
 
-### MVP 1: Internal Auth And Roles
+### V1 Track 1: Internal Auth And Roles
 
 - Entra auth skeleton.
 - Admin/host/player role model.
 - Host privilege request and approval workflow.
 - CGI partner access baseline with per-game allowlist enforcement.
 
-### MVP 2: Manual Template To Game Run
+### V1 Track 2: Manual Template To Game Run
 
 - Host creates a recurring game template.
 - Backend materializes one game run manually.
@@ -628,7 +628,7 @@ The old MVP was "make live bingo real." The new MVP should be "make one automate
 - Invites can be mocked/logged first.
 - Start threshold configured as more than 5 players.
 
-### MVP 3: Real Game Engine
+### V1 Track 3: Real Game Engine
 
 - Player join/rejoin.
 - Persisted cards.
@@ -637,14 +637,14 @@ The old MVP was "make live bingo real." The new MVP should be "make one automate
 - Top 3 winners.
 - On-screen summary.
 
-### MVP 4: Automated Notifications
+### V1 Track 4: Automated Notifications
 
 - Microsoft Graph email invite.
 - Winner email.
 - Host summary email.
 - Basic Teams notification.
 
-### MVP 5: AI Content Generation
+### V1 Track 5: AI Content Generation
 
 - Prompt library.
 - Generate word set from prompt.
@@ -652,7 +652,7 @@ The old MVP was "make live bingo real." The new MVP should be "make one automate
 - Review email and auto-approval fallback.
 - Reuse word sets.
 
-### MVP 6: Autonomous Caller
+### V1 Track 6: Autonomous Caller
 
 - Autonomous call cadence.
 - AI caller text.
@@ -661,7 +661,7 @@ The old MVP was "make live bingo real." The new MVP should be "make one automate
 - Admin-managed consented employee voice profiles.
 - Host voice selection and auto mode.
 
-### MVP 7: Rewards
+### V1 Track 7: Rewards
 
 - Reward provider adapter.
 - Gift card fulfillment statuses.

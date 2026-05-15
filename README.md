@@ -20,7 +20,7 @@ Start with:
 1. `docs/proposals/TECH_STACK_PROPOSAL_UPDATED.md`
 2. `docs/architecture/AUTONOMOUS_BACKEND_ARCHITECTURE.md`
 3. `docs/architecture/GO_BACKEND_PLAN.md`
-4. `docs/architecture/MVP_IMPLEMENTATION_PLAN.md`
+4. `docs/architecture/V1_IMPLEMENTATION_PLAN.md`
 
 The frontend app is a demo, not the final production architecture.
 

@@ -5,7 +5,8 @@
 - `proposals/TECH_STACK_PROPOSAL_UPDATED.md` - current recommended stack.
 - `architecture/AUTONOMOUS_BACKEND_ARCHITECTURE.md` - product and backend architecture decisions.
 - `architecture/GO_BACKEND_PLAN.md` - lower-level Go backend implementation plan.
-- `architecture/MVP_IMPLEMENTATION_PLAN.md` - two-week MVP build order and first API/schema milestones.
+- `architecture/V1_IMPLEMENTATION_PLAN.md` - production V1 build order and next realtime/game-engine milestones.
+- `architecture/V1_REALTIME_BACKBONE_PROMPT.md` - ready-to-use prompt for the next realtime backend implementation pass.
 
 ## Supporting Docs
 
