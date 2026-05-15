@@ -17,6 +17,12 @@ func (r *responseStatusRecorder) WriteHeader(status int) {
 	r.ResponseWriter.WriteHeader(status)
 }
 
+func (r *responseStatusRecorder) Flush() {
+	if flusher, ok := r.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 type requestIDContextKey struct{}
 
 func (s *Server) logRequests(next http.Handler) http.Handler {

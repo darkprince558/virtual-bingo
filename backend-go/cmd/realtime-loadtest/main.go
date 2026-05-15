@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -172,11 +173,12 @@ func (c client) do(ctx context.Context, method, path string, body any, out any) 
 	if err := json.Unmarshal(responseBody, &wrapped); err != nil {
 		return nil, err
 	}
-	if err := json.Unmarshal(wrapped.Data, out); err != nil {
+	target := reflect.New(reflect.TypeOf(out))
+	if err := json.Unmarshal(wrapped.Data, target.Interface()); err != nil {
 		return nil, err
 	}
 
-	return out, nil
+	return target.Elem().Interface(), nil
 }
 
 func (c client) streamEvents(ctx context.Context, gameID string, count *atomic.Int64) {
