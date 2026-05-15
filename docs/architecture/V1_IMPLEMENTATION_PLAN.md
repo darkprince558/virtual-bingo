@@ -64,7 +64,9 @@ Production V1 is still built locally first, but local work should be shaped for 
 13. Done: add event outbox storage for committed gameplay events.
 14. Done: add SSE endpoint for ordered outbox events and snapshot refetching.
 15. Done: add a 50-player load helper for realtime connections and gameplay bursts.
-16. Next: add Entra-ready auth seams before production login is wired.
+16. Done: add Entra-ready auth seams before production login is wired.
+17. Done: add player reconnect/heartbeat state tracking with committed connection events for meaningful transitions.
+18. Next: smoke-test the full local backend flow, then wire the frontend to these backend contracts.
 
 ## Frontend Milestone Order
 
@@ -107,6 +109,7 @@ Current backend endpoints:
 | `GET` | `/api/v1/games/{gameID}/summary` | Return winners and final state. |
 | `GET` | `/api/v1/games/{gameID}/host-snapshot` | Return host hydration/reconnect state. |
 | `GET` | `/api/v1/games/{gameID}/players/{playerID}/snapshot` | Return player hydration/reconnect state. |
+| `POST` | `/api/v1/games/{gameID}/players/{playerID}/heartbeat` | Refresh player online state and `last_seen_at`. |
 | `GET` | `/api/v1/games/{gameID}/events` | Stream committed game events with SSE. |
 
 Use `net/http` until route complexity proves a small router is worth adding.
@@ -122,6 +125,23 @@ The realtime backbone is implemented in the Go backend as a Postgres-backed even
 - `cmd/realtime-loadtest` can simulate at least 50 player/SSE connections, word calls, mark bursts, claim submissions, and reconnect snapshot fetches against a running local API.
 
 Redis and Gorilla/WebSocket remain deferred on purpose. The current backend should first prove the single-instance, Postgres-authoritative path under local 50-player testing. Redis, Service Bus, Azure SignalR, or WebSocket fanout can be added after a measured scaling need appears or when multi-instance Azure deployment requires cross-process event delivery.
+
+## Auth And Reconnect Hardening Status
+
+The backend is Entra-ready but not yet running real Microsoft login.
+
+- `AUTH_MODE=dev` remains the default local/test mode and maps development headers into the same internal principal used by services.
+- `AUTH_MODE=entra-ready` switches to the same handler-facing `auth.Authenticator` boundary with bearer-token parsing, a token verifier interface, claims-to-principal mapping, and role mapping.
+- Entra placeholders exist for tenant ID, client ID/audience, issuer, and JWKS URL. The default verifier is intentionally unconfigured, so local runs do not require Azure credentials, live Microsoft network calls, or JWKS fetching.
+- Future real Entra work should implement the verifier behind the existing interface, validate issuer/audience/tenant/JWKS, and preserve the current `auth.Principal` shape.
+
+Player connection state is now persisted and visible:
+
+- Join creates players as `online`; rejoin updates the existing row to `online`, refreshes `last_seen_at`, and writes a committed `player.reconnected` event.
+- Player snapshot fetches and `POST /api/v1/games/{gameID}/players/{playerID}/heartbeat` refresh `last_seen_at` for the authorized player or for host/admin acting on that player.
+- Host snapshots include each player's `connectionState` and `lastSeenAt`.
+- Heartbeat/snapshot refreshes do not emit noisy outbox rows while a player is already online, but reconnect transitions from offline/disconnected emit `player.reconnected`.
+- The current `/events` stream is game-level; it does not infer per-player disconnects from SSE close. A later frontend should call the heartbeat endpoint while the player screen is open. A worker/timer-based timeout model can later mark stale players offline/disconnected if product needs exact presence.
 
 ## Schema Phases
 
@@ -171,6 +191,7 @@ Redis and Gorilla/WebSocket remain deferred on purpose. The current backend shou
 These are not part of the immediate realtime game backbone, but they are production V1 tracks and should stay behind interfaces instead of being hard-coded into handlers:
 
 - Microsoft Entra ID production authentication.
+- Real Microsoft Entra login, JWKS fetching, and JWT validation.
 - Microsoft Graph Outlook or Teams delivery.
 - Azure OpenAI content generation.
 - Azure Speech voice calling.
@@ -187,4 +208,4 @@ Use local development placeholders where needed. For example, development auth c
 
 ## Immediate Next Backend Task
 
-The next backend-only step is production auth and operational hardening: add an Entra-ready auth verifier seam without enabling Microsoft login yet, then add stronger connection-state/audit behavior around player reconnects and SSE disconnects. Keep frontend wiring, Teams/Graph/email, AI caller, Azure Speech, rewards, and Azure deployment deferred until the realtime game loop has been smoke-tested end to end.
+The next backend-only step is contract hardening after smoke verification: tighten authorization around remaining player-owned write paths such as card assignment, card fetch, mark/unmark, and claim submission, then add any missing API contract tests needed before frontend wiring. Keep Teams/Graph/email, AI caller, Azure Speech, rewards, Azure deployment, Redis, Gorilla/WebSocket, and real Entra/JWKS validation deferred until the local game loop is wired and smoke-tested end to end.

@@ -1,6 +1,6 @@
 # Virtual Bingo Go Backend
 
-This is the production backend foundation for the autonomous Virtual Bingo platform. It currently has typed environment config, health/readiness endpoints, a version endpoint, Postgres migrations, local seed data, a store layer, and the Production V1 API flow for game runs, allowed players, player join, persisted cards, game start, called words, marks, claims, winners, and summary state.
+This is the production backend foundation for the autonomous Virtual Bingo platform. It currently has typed environment config, health/readiness endpoints, a version endpoint, Postgres migrations, local seed data, a store layer, Entra-ready auth seams, and the Production V1 API flow for game runs, allowed players, player join/rejoin, connection heartbeat, persisted cards, game start, called words, marks, claims, winners, and summary state.
 
 ## Local Setup
 
@@ -33,6 +33,7 @@ The API listens on `http://localhost:8080` by default.
 - `POST /api/v1/games/{gameID}/cancel`
 - `GET /api/v1/games/{gameID}/host-snapshot`
 - `GET /api/v1/games/{gameID}/players/{playerID}/snapshot`
+- `POST /api/v1/games/{gameID}/players/{playerID}/heartbeat`
 - `GET /api/v1/games/{gameID}/events`
 - `POST /api/v1/games/{gameID}/calls`
 - `GET /api/v1/games/{gameID}/calls`
@@ -48,7 +49,14 @@ The API listens on `http://localhost:8080` by default.
 
 API responses are wrapped as `{ "data": ... }` for success and `{ "error": { "code": "...", "message": "..." } }` for errors. The API accepts `X-Request-ID` and returns it on each response.
 
-Development auth is header-based for now:
+## Auth Modes
+
+Auth mode is selected with `AUTH_MODE`.
+
+- `AUTH_MODE=dev` is the local default. It keeps tests and smoke flows easy by building the internal principal from development headers.
+- `AUTH_MODE=entra-ready` switches the backend to the same `auth.Authenticator` handler boundary but expects a bearer token verified by an injectable token verifier. The current runtime verifier is intentionally unconfigured/offline, so real Microsoft network calls, JWKS fetching, and Azure credentials are not required yet.
+
+Development auth is header-based:
 
 ```text
 X-Dev-User-Email: host@example.local
@@ -56,7 +64,14 @@ X-Dev-User-Name: Local Demo Host
 X-Dev-User-Role: host
 ```
 
-This is intentionally shaped so Microsoft Entra JWT validation can later produce the same internal principal without changing handlers.
+The Entra-ready seam now includes config placeholders for tenant ID, client ID/audience, issuer, and JWKS URL through `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, `ENTRA_AUDIENCE`, `ENTRA_ISSUER`, and `ENTRA_JWKS_URL`. The auth package has a token verifier interface, claims-to-principal mapping, and role mapping. Future Microsoft Entra JWT validation should plug into that verifier without changing handlers or the service principal shape.
+
+Authorization behavior is explicit in the service layer:
+
+- `admin` and `host` can create/manage games, add allowed players, call words, list host claims, and fetch host snapshots.
+- `player` can fetch or heartbeat only their own player snapshot when the authenticated email matches the player record.
+- Missing or invalid auth returns `{ "error": { "code": "unauthorized", "message": "authentication is required" } }`.
+- Authenticated users without the needed role/scope return `{ "error": { "code": "forbidden", "message": "you do not have permission to perform this action" } }`.
 
 ## Realtime Backbone
 
@@ -71,9 +86,14 @@ The Production V1 realtime path is Postgres-first:
 Snapshot endpoints are intended for reconnect and screen hydration:
 
 - `GET /api/v1/games/{gameID}/host-snapshot` returns the game run, status, current word, winning pattern, player count, players, called words, claims with validation results, and winners. It requires a dev-auth `host` or `admin` role for now.
-- `GET /api/v1/games/{gameID}/players/{playerID}/snapshot` returns the game run, status, current word, winning pattern, player, assigned card with marks when present, called words, that player's claims, and winners. Dev auth currently allows host/admin access or a matching player email.
+- `GET /api/v1/games/{gameID}/players/{playerID}/snapshot` returns the game run, status, current word, winning pattern, player, assigned card with marks when present, called words, that player's claims, and winners. Dev auth currently allows host/admin access or a matching player email. A successful player snapshot marks that player `online` and refreshes `last_seen_at`.
+- `POST /api/v1/games/{gameID}/players/{playerID}/heartbeat` marks the player `online` and refreshes `last_seen_at`. It requires host/admin access or a matching player email.
+
+Connection state is persisted on `players.connection_state` and `players.last_seen_at`. New joins start `online`; explicit rejoins refresh `last_seen_at` and write a committed `player.reconnected` outbox event. Snapshot/heartbeat refreshes avoid noisy outbox rows while a player is already online, but write `player.reconnected` when the stored state was offline/disconnected. The current SSE endpoint is game-level, so it does not fake player disconnect identity on stream close. A future frontend should call the heartbeat endpoint while a player card is open and refetch snapshots after important SSE events. Exact offline/disconnect timeout detection remains a deferred worker/timer concern.
 
 Redis, Service Bus fanout, and Gorilla/WebSocket are intentionally deferred. The current target is one Go API instance proving 50-player playability with simple Postgres polling and small event payloads; clients should refetch snapshots after important events. Redis or Azure fanout should only be added after load testing shows this local polling design is the bottleneck or multi-instance deployment needs cross-process delivery.
+
+Still deferred for Production V1: real Microsoft Entra login/JWKS validation, Microsoft Graph, Teams/email delivery, AI caller, Azure Speech, rewards, Azure deployment, and frontend wiring.
 
 ## Game Rules Implemented
 
@@ -243,6 +263,10 @@ curl -sS http://localhost:8080/api/v1/games/<game-id>/host-snapshot \
   -H 'X-Dev-User-Role: host'
 
 curl -sS http://localhost:8080/api/v1/games/<game-id>/players/<player-id>/snapshot \
+  -H 'X-Dev-User-Email: alex@example.local' \
+  -H 'X-Dev-User-Role: player'
+
+curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/players/<player-id>/heartbeat \
   -H 'X-Dev-User-Email: alex@example.local' \
   -H 'X-Dev-User-Role: player'
 
