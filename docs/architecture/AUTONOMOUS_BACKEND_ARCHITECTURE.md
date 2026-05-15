@@ -6,7 +6,7 @@ Related planning docs:
 
 - `../proposals/TECH_STACK_PROPOSAL_UPDATED.md`
 - `GO_BACKEND_PLAN.md`
-- `PRODUCTION_READINESS_RESEARCH.md`
+- `../archive/architecture/PRODUCTION_READINESS_RESEARCH.md`
 
 ## Goal
 

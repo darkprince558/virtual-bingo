@@ -6,7 +6,7 @@ Related planning docs:
 
 - `../proposals/TECH_STACK_PROPOSAL_UPDATED.md`
 - `AUTONOMOUS_BACKEND_ARCHITECTURE.md`
-- `PRODUCTION_READINESS_RESEARCH.md`
+- `../archive/architecture/PRODUCTION_READINESS_RESEARCH.md`
 
 ## Direction
 
