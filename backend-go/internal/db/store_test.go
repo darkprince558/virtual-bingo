@@ -145,6 +145,37 @@ func TestStoreCardCreation(t *testing.T) {
 	}
 }
 
+func TestStorePlayerConnectionState(t *testing.T) {
+	ctx := context.Background()
+	store, pool := setupMigratedStore(t, ctx)
+	defer pool.Close()
+
+	runID := insertTestRun(t, ctx, pool)
+	player, err := store.CreatePlayer(ctx, CreatePlayerParams{
+		GameRunID:       runID,
+		Email:           "connection@example.local",
+		DisplayName:     "Connection Player",
+		ConnectionState: "offline",
+		State:           "joined",
+	})
+	if err != nil {
+		t.Fatalf("create player: %v", err)
+	}
+
+	updated, err := store.UpdatePlayerConnectionState(ctx, UpdatePlayerConnectionStateParams{
+		GameRunID:       runID,
+		PlayerID:        player.ID,
+		ConnectionState: "online",
+		EventType:       "player.reconnected",
+	})
+	if err != nil {
+		t.Fatalf("update player connection state: %v", err)
+	}
+	if updated.ConnectionState != "online" || !updated.LastSeenAt.After(player.LastSeenAt) {
+		t.Fatalf("unexpected updated player: %+v after %+v", updated, player)
+	}
+}
+
 func setupMigratedStore(t *testing.T, ctx context.Context) (*Store, *Pool) {
 	t.Helper()
 

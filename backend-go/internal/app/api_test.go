@@ -21,6 +21,7 @@ import (
 
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/config"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/db"
+	gamesvc "github.com/darkprince558/virtual-bingo/backend-go/internal/game"
 	_ "github.com/lib/pq"
 )
 
@@ -285,6 +286,82 @@ func TestAPIPlayerReconnectHeartbeatAndAuthorization(t *testing.T) {
 
 	events := gameEventsFromDB(t, ctx, pool, gameID)
 	assertEventTypes(t, events, []string{"player.joined", "player.reconnected"})
+}
+
+func TestAPIPlayerTimeoutDisconnectAndReconnectNotice(t *testing.T) {
+	ctx := context.Background()
+	databaseURL := createTestDatabase(t)
+	if err := db.RunMigrationsFromPath(databaseURL, "../db/migrations", db.MigrationUp); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	pool, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	defer pool.Close()
+
+	wordSetID := insertAPIWordSet(t, ctx, pool)
+	handler := NewServer(config.Config{AppEnv: "test", DatabaseURL: databaseURL}, testLogger(), pool).Handler
+	gameID := createAPIGame(t, handler, "Timeout Test Game", "TIMEOUT-TEST", wordSetID, nil)
+	playerID, _ := allowJoinAndAssignCard(t, handler, gameID, "timeout@example.local", "Timeout Player")
+
+	if resp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/start", nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected start 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+
+	staleSeenAt := time.Now().Add(-2 * time.Hour).UTC().Truncate(time.Microsecond)
+	if _, err := pool.Exec(ctx, `
+		UPDATE players
+		SET connection_state = 'online',
+		    last_seen_at = $2,
+		    updated_at = now()
+		WHERE id = $1
+	`, playerID, staleSeenAt); err != nil {
+		t.Fatalf("force stale online player: %v", err)
+	}
+
+	firstCallResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/calls", nil)
+	if firstCallResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected first call 201, got %d: %s", firstCallResp.StatusCode, firstCallResp.Body)
+	}
+	secondCallResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/calls", nil)
+	if secondCallResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected second call 201, got %d: %s", secondCallResp.StatusCode, secondCallResp.Body)
+	}
+
+	service := gamesvc.NewService(gamesvc.ServiceConfig{Store: db.NewStore(pool)})
+	disconnected, err := service.SweepStalePlayerConnections(ctx, 30*time.Minute, 10)
+	if err != nil {
+		t.Fatalf("sweep stale players: %v", err)
+	}
+	if len(disconnected) != 1 || disconnected[0].ID != playerID || disconnected[0].ConnectionState != "disconnected" || disconnected[0].State != "disconnected" {
+		t.Fatalf("expected stale player to be disconnected, got %+v", disconnected)
+	}
+
+	hostSnapshotResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/host-snapshot", nil)
+	if hostSnapshotResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected host snapshot 200, got %d: %s", hostSnapshotResp.StatusCode, hostSnapshotResp.Body)
+	}
+	hostSnapshot := hostSnapshotFromData(t, hostSnapshotResp.Body)
+	if len(hostSnapshot.Players) != 1 || hostSnapshot.Players[0].ConnectionState != "disconnected" {
+		t.Fatalf("expected host to see disconnected player, got %+v", hostSnapshot.Players)
+	}
+
+	playerSnapshotResp := doRequestWithDevAuth(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/players/"+playerID+"/snapshot", nil, "timeout@example.local", "Timeout Player", "player")
+	if playerSnapshotResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected reconnect snapshot 200, got %d: %s", playerSnapshotResp.StatusCode, playerSnapshotResp.Body)
+	}
+	playerSnapshot := playerSnapshotFromData(t, playerSnapshotResp.Body)
+	if playerSnapshot.Player.ConnectionState != "online" || playerSnapshot.Player.State != "playing" {
+		t.Fatalf("expected reconnect to restore online playing state, got %+v", playerSnapshot.Player)
+	}
+	if playerSnapshot.ReconnectNotice == nil || len(playerSnapshot.ReconnectNotice.MissedCalledWords) != 2 {
+		t.Fatalf("expected reconnect notice with 2 missed called words, got %+v", playerSnapshot.ReconnectNotice)
+	}
+
+	events := gameEventsFromDB(t, ctx, pool, gameID)
+	assertEventTypes(t, events, []string{"player.disconnected", "player.reconnected"})
 }
 
 func TestAPIGameplayFlow(t *testing.T) {
@@ -974,13 +1051,19 @@ type apiHostSnapshot struct {
 }
 
 type apiPlayerSnapshot struct {
-	Status      string          `json:"status"`
-	CurrentWord *apiCalledWord  `json:"currentWord"`
-	Player      apiPlayer       `json:"player"`
-	Card        *apiCard        `json:"card"`
-	CalledWords []apiCalledWord `json:"calledWords"`
-	Claims      []apiClaim      `json:"claims"`
-	Winners     []apiWinner     `json:"winners"`
+	Status          string              `json:"status"`
+	CurrentWord     *apiCalledWord      `json:"currentWord"`
+	Player          apiPlayer           `json:"player"`
+	Card            *apiCard            `json:"card"`
+	CalledWords     []apiCalledWord     `json:"calledWords"`
+	Claims          []apiClaim          `json:"claims"`
+	Winners         []apiWinner         `json:"winners"`
+	ReconnectNotice *apiReconnectNotice `json:"reconnectNotice"`
+}
+
+type apiReconnectNotice struct {
+	LastSeenAt        time.Time       `json:"lastSeenAt"`
+	MissedCalledWords []apiCalledWord `json:"missedCalledWords"`
 }
 
 type apiGameEvent struct {

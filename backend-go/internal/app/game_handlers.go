@@ -241,7 +241,7 @@ func (s *Server) joinPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	player, err := s.service.JoinPlayer(r.Context(), game.JoinPlayerInput{
+	update, err := s.service.JoinPlayer(r.Context(), game.JoinPlayerInput{
 		GameRunID:   r.PathValue("gameID"),
 		Email:       req.Email,
 		DisplayName: req.DisplayName,
@@ -251,7 +251,7 @@ func (s *Server) joinPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeData(w, http.StatusCreated, playerResponseFromDomain(player))
+	writeData(w, http.StatusCreated, playerConnectionResponseFromDomain(update))
 }
 
 func (s *Server) assignPlayerCard(w http.ResponseWriter, r *http.Request) {
@@ -425,13 +425,13 @@ func (s *Server) heartbeatPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	player, err := s.service.HeartbeatPlayer(r.Context(), principal, r.PathValue("gameID"), r.PathValue("playerID"))
+	update, err := s.service.HeartbeatPlayer(r.Context(), principal, r.PathValue("gameID"), r.PathValue("playerID"))
 	if err != nil {
 		mapServiceError(w, err)
 		return
 	}
 
-	writeData(w, http.StatusOK, playerResponseFromDomain(player))
+	writeData(w, http.StatusOK, playerConnectionResponseFromDomain(update))
 }
 
 func (s *Server) streamGameEvents(w http.ResponseWriter, r *http.Request) {
@@ -559,15 +559,16 @@ type allowedPlayerResponse struct {
 }
 
 type playerResponse struct {
-	ID              string    `json:"id"`
-	GameRunID       string    `json:"gameRunId"`
-	UserID          *string   `json:"userId,omitempty"`
-	Email           string    `json:"email"`
-	DisplayName     string    `json:"displayName"`
-	ConnectionState string    `json:"connectionState"`
-	State           string    `json:"state"`
-	JoinedAt        time.Time `json:"joinedAt"`
-	LastSeenAt      time.Time `json:"lastSeenAt"`
+	ID              string                   `json:"id"`
+	GameRunID       string                   `json:"gameRunId"`
+	UserID          *string                  `json:"userId,omitempty"`
+	Email           string                   `json:"email"`
+	DisplayName     string                   `json:"displayName"`
+	ConnectionState string                   `json:"connectionState"`
+	State           string                   `json:"state"`
+	JoinedAt        time.Time                `json:"joinedAt"`
+	LastSeenAt      time.Time                `json:"lastSeenAt"`
+	ReconnectNotice *reconnectNoticeResponse `json:"reconnectNotice,omitempty"`
 }
 
 type cardResponse struct {
@@ -654,15 +655,16 @@ type hostSnapshotResponse struct {
 }
 
 type playerSnapshotResponse struct {
-	GameRun        gameRunResponse      `json:"gameRun"`
-	Status         string               `json:"status"`
-	CurrentWord    *calledWordResponse  `json:"currentWord,omitempty"`
-	WinningPattern string               `json:"winningPattern"`
-	Player         playerResponse       `json:"player"`
-	Card           *cardResponse        `json:"card,omitempty"`
-	CalledWords    []calledWordResponse `json:"calledWords"`
-	Claims         []claimResponse      `json:"claims"`
-	Winners        []winnerResponse     `json:"winners"`
+	GameRun         gameRunResponse          `json:"gameRun"`
+	Status          string                   `json:"status"`
+	CurrentWord     *calledWordResponse      `json:"currentWord,omitempty"`
+	WinningPattern  string                   `json:"winningPattern"`
+	Player          playerResponse           `json:"player"`
+	Card            *cardResponse            `json:"card,omitempty"`
+	CalledWords     []calledWordResponse     `json:"calledWords"`
+	Claims          []claimResponse          `json:"claims"`
+	Winners         []winnerResponse         `json:"winners"`
+	ReconnectNotice *reconnectNoticeResponse `json:"reconnectNotice,omitempty"`
 }
 
 type eventResponse struct {
@@ -673,6 +675,11 @@ type eventResponse struct {
 	Payload   json.RawMessage `json:"payload"`
 	Sequence  int64           `json:"sequence"`
 	CreatedAt time.Time       `json:"createdAt"`
+}
+
+type reconnectNoticeResponse struct {
+	LastSeenAt        time.Time            `json:"lastSeenAt"`
+	MissedCalledWords []calledWordResponse `json:"missedCalledWords"`
 }
 
 func gameRunResponseFromDomain(run game.GameRunWithCounts) gameRunResponse {
@@ -718,6 +725,12 @@ func playerResponseFromDomain(player domain.Player) playerResponse {
 		JoinedAt:        player.JoinedAt,
 		LastSeenAt:      player.LastSeenAt,
 	}
+}
+
+func playerConnectionResponseFromDomain(update game.PlayerConnectionUpdate) playerResponse {
+	response := playerResponseFromDomain(update.Player)
+	response.ReconnectNotice = reconnectNoticeResponseFromDomain(update.ReconnectNotice)
+	return response
 }
 
 func cardCellResponseFromDomain(cell domain.BingoCardCell) cardCellResponse {
@@ -907,15 +920,32 @@ func playerSnapshotResponseFromDomain(snapshot domain.PlayerSnapshot) playerSnap
 	}
 
 	return playerSnapshotResponse{
-		GameRun:        gameRunResponseFromDomain(game.GameRunWithCounts{GameRun: snapshot.GameRun}),
-		Status:         snapshot.Status,
-		CurrentWord:    currentWord,
-		WinningPattern: snapshot.Pattern,
-		Player:         playerResponseFromDomain(snapshot.Player),
-		Card:           card,
-		CalledWords:    calledWords,
-		Claims:         claims,
-		Winners:        winners,
+		GameRun:         gameRunResponseFromDomain(game.GameRunWithCounts{GameRun: snapshot.GameRun}),
+		Status:          snapshot.Status,
+		CurrentWord:     currentWord,
+		WinningPattern:  snapshot.Pattern,
+		Player:          playerResponseFromDomain(snapshot.Player),
+		Card:            card,
+		CalledWords:     calledWords,
+		Claims:          claims,
+		Winners:         winners,
+		ReconnectNotice: reconnectNoticeResponseFromDomain(snapshot.ReconnectNotice),
+	}
+}
+
+func reconnectNoticeResponseFromDomain(notice *domain.ReconnectNotice) *reconnectNoticeResponse {
+	if notice == nil {
+		return nil
+	}
+
+	missed := make([]calledWordResponse, 0, len(notice.MissedCalledWords))
+	for _, word := range notice.MissedCalledWords {
+		missed = append(missed, calledWordResponseFromDomain(word))
+	}
+
+	return &reconnectNoticeResponse{
+		LastSeenAt:        notice.LastSeenAt,
+		MissedCalledWords: missed,
 	}
 }
 

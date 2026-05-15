@@ -52,11 +52,18 @@ func NewServer(cfg config.Config, logger *slog.Logger, database *db.Pool) *http.
 		service:  service,
 	}
 
-	return &http.Server{
+	httpServer := &http.Server{
 		Addr:              cfg.Addr(),
 		Handler:           appServer.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+	if service != nil && cfg.PlayerConnectionTimeout > 0 && cfg.PlayerConnectionSweepInterval > 0 {
+		ctx, cancel := context.WithCancel(context.Background())
+		httpServer.RegisterOnShutdown(cancel)
+		go appServer.runPlayerConnectionSweeper(ctx)
+	}
+
+	return httpServer
 }
 
 func newAuthenticator(cfg config.Config) auth.Authenticator {
@@ -70,4 +77,25 @@ func newAuthenticator(cfg config.Config) auth.Authenticator {
 			JWKSURL:  cfg.EntraJWKSURL,
 		},
 	})
+}
+
+func (s *Server) runPlayerConnectionSweeper(ctx context.Context) {
+	ticker := time.NewTicker(s.cfg.PlayerConnectionSweepInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			players, err := s.service.SweepStalePlayerConnections(ctx, s.cfg.PlayerConnectionTimeout, s.cfg.PlayerConnectionSweepBatchSize)
+			if err != nil {
+				s.logger.Error("player connection sweep failed", "error", err)
+				continue
+			}
+			if len(players) > 0 {
+				s.logger.Info("marked stale players disconnected", "count", len(players))
+			}
+		}
+	}
 }

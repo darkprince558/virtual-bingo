@@ -89,7 +89,26 @@ Snapshot endpoints are intended for reconnect and screen hydration:
 - `GET /api/v1/games/{gameID}/players/{playerID}/snapshot` returns the game run, status, current word, winning pattern, player, assigned card with marks when present, called words, that player's claims, and winners. Dev auth currently allows host/admin access or a matching player email. A successful player snapshot marks that player `online` and refreshes `last_seen_at`.
 - `POST /api/v1/games/{gameID}/players/{playerID}/heartbeat` marks the player `online` and refreshes `last_seen_at`. It requires host/admin access or a matching player email.
 
-Connection state is persisted on `players.connection_state` and `players.last_seen_at`. New joins start `online`; explicit rejoins refresh `last_seen_at` and write a committed `player.reconnected` outbox event. Snapshot/heartbeat refreshes avoid noisy outbox rows while a player is already online, but write `player.reconnected` when the stored state was offline/disconnected. The current SSE endpoint is game-level, so it does not fake player disconnect identity on stream close. A future frontend should call the heartbeat endpoint while a player card is open and refetch snapshots after important SSE events. Exact offline/disconnect timeout detection remains a deferred worker/timer concern.
+Connection state is persisted on `players.connection_state` and `players.last_seen_at`. New joins start `online`; explicit rejoins refresh `last_seen_at` and write a committed `player.reconnected` outbox event. Snapshot/heartbeat refreshes avoid noisy outbox rows while a player is already online, but write `player.reconnected` when the stored state was offline/disconnected. The current SSE endpoint is game-level, so it does not fake player disconnect identity on stream close. A future frontend should call the heartbeat endpoint while a player card is open and refetch snapshots after important SSE events.
+
+The API also runs a configurable stale-player sweeper:
+
+```text
+PLAYER_CONNECTION_TIMEOUT_SECONDS=90
+PLAYER_CONNECTION_SWEEP_INTERVAL_SECONDS=30
+PLAYER_CONNECTION_SWEEP_BATCH_SIZE=100
+```
+
+When an `online` player in an active lobby/live/paused game has not checked in before the timeout, the backend marks them `disconnected` and writes a committed `player.disconnected` event. When that player later rejoins, heartbeats, or fetches their player snapshot, the backend returns them to `online` and includes a `reconnectNotice` payload with the words called after their previous `lastSeenAt`:
+
+```json
+{
+  "reconnectNotice": {
+    "lastSeenAt": "2026-05-15T15:00:00Z",
+    "missedCalledWords": [{ "word": "Smoke Word 01", "sequence": 1 }]
+  }
+}
+```
 
 Redis, Service Bus fanout, and Gorilla/WebSocket are intentionally deferred. The current target is one Go API instance proving 50-player playability with simple Postgres polling and small event payloads; clients should refetch snapshots after important events. Redis or Azure fanout should only be added after load testing shows this local polling design is the bottleneck or multi-instance deployment needs cross-process delivery.
 

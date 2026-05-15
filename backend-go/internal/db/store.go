@@ -397,14 +397,17 @@ func (s *Store) UpdatePlayerConnectionState(ctx context.Context, params UpdatePl
 		SET connection_state = $3,
 		    state = CASE
 		      WHEN $3 = 'disconnected' AND state <> 'confirmed_winner' THEN 'disconnected'
+		      WHEN $3 = 'online' AND state = 'disconnected' AND game_runs.status IN ('live', 'paused') THEN 'playing'
 		      WHEN $3 = 'online' AND state = 'disconnected' THEN 'joined'
 		      ELSE state
 		    END,
 		    last_seen_at = now(),
 		    updated_at = now()
-		WHERE game_run_id = $1
-		  AND id = $2
-		RETURNING id::text, game_run_id::text, user_id::text, email, display_name, connection_state, state, joined_at, last_seen_at, created_at, updated_at
+		FROM game_runs
+		WHERE players.game_run_id = $1
+		  AND players.id = $2
+		  AND game_runs.id = players.game_run_id
+		RETURNING players.id::text, players.game_run_id::text, players.user_id::text, players.email, players.display_name, players.connection_state, players.state, players.joined_at, players.last_seen_at, players.created_at, players.updated_at
 	`, params.GameRunID, params.PlayerID, connectionState)
 	player, err := scanPlayer(row)
 	if err != nil {
@@ -425,6 +428,89 @@ func (s *Store) UpdatePlayerConnectionState(ctx context.Context, params UpdatePl
 	}
 
 	return player, nil
+}
+
+type MarkStalePlayersDisconnectedParams struct {
+	Cutoff time.Time
+	Limit  int
+}
+
+func (s *Store) MarkStalePlayersDisconnected(ctx context.Context, params MarkStalePlayersDisconnectedParams) ([]domain.Player, error) {
+	limit := params.Limit
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	rows, err := tx.Query(ctx, `
+		SELECT p.id::text, p.game_run_id::text, p.user_id::text, p.email, p.display_name, p.connection_state, p.state, p.joined_at, p.last_seen_at, p.created_at, p.updated_at
+		FROM players AS p
+		JOIN game_runs AS g ON g.id = p.game_run_id
+		WHERE p.connection_state = 'online'
+		  AND p.last_seen_at < $1
+		  AND g.status IN ('lobby_open', 'live', 'paused')
+		ORDER BY p.last_seen_at ASC, p.id ASC
+		LIMIT $2
+		FOR UPDATE OF p
+	`, params.Cutoff, limit)
+	if err != nil {
+		return nil, mapWriteError(err)
+	}
+
+	candidates := make([]domain.Player, 0)
+	for rows.Next() {
+		player, err := scanPlayer(rows)
+		if err != nil {
+			rows.Close()
+			return nil, err
+		}
+		candidates = append(candidates, player)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	updatedPlayers := make([]domain.Player, 0, len(candidates))
+	for _, candidate := range candidates {
+		if _, err := getGameRunForUpdate(ctx, tx, candidate.GameRunID); err != nil {
+			return nil, mapWriteError(err)
+		}
+
+		row := tx.QueryRow(ctx, `
+			UPDATE players
+			SET connection_state = 'disconnected',
+			    state = CASE WHEN state <> 'confirmed_winner' THEN 'disconnected' ELSE state END,
+			    updated_at = now()
+			WHERE id = $1
+			RETURNING id::text, game_run_id::text, user_id::text, email, display_name, connection_state, state, joined_at, last_seen_at, created_at, updated_at
+		`, candidate.ID)
+		player, err := scanPlayer(row)
+		if err != nil {
+			return nil, mapWriteError(err)
+		}
+
+		if _, err := insertOutboxEventInTx(ctx, tx, player.GameRunID, "player.disconnected", &player.ID, map[string]any{
+			"playerId":        player.ID,
+			"connectionState": player.ConnectionState,
+			"lastSeenAt":      player.LastSeenAt,
+		}); err != nil {
+			return nil, err
+		}
+		updatedPlayers = append(updatedPlayers, player)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, mapWriteError(err)
+	}
+
+	return updatedPlayers, nil
 }
 
 func (s *Store) ListWordSetWords(ctx context.Context, wordSetID string) ([]domain.WordSetWord, error) {

@@ -143,7 +143,9 @@ Player connection state is now persisted and visible:
 - Player snapshot fetches and `POST /api/v1/games/{gameID}/players/{playerID}/heartbeat` refresh `last_seen_at` for the authorized player or for host/admin acting on that player.
 - Host snapshots include each player's `connectionState` and `lastSeenAt`.
 - Heartbeat/snapshot refreshes do not emit noisy outbox rows while a player is already online, but reconnect transitions from offline/disconnected emit `player.reconnected`.
-- The current `/events` stream is game-level; it does not infer per-player disconnects from SSE close. A later frontend should call the heartbeat endpoint while the player screen is open. A worker/timer-based timeout model can later mark stale players offline/disconnected if product needs exact presence.
+- The API runs a configurable stale-player sweeper using `PLAYER_CONNECTION_TIMEOUT_SECONDS`, `PLAYER_CONNECTION_SWEEP_INTERVAL_SECONDS`, and `PLAYER_CONNECTION_SWEEP_BATCH_SIZE`. Stale online players in active lobby/live/paused games move to `disconnected` and emit `player.disconnected`.
+- When a disconnected player returns through rejoin, heartbeat, or player snapshot, responses can include `reconnectNotice.missedCalledWords`, which contains called words after the player's previous `lastSeenAt`. This gives the future frontend the exact data needed for a "while you were away" notification.
+- The current `/events` stream is game-level; it does not infer per-player disconnects from SSE close. The frontend should keep calling heartbeat while the player screen is open and use `reconnectNotice` on return.
 
 ## Schema Phases
 

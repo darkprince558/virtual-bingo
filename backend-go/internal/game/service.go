@@ -43,6 +43,7 @@ type Store interface {
 	GetPlayer(context.Context, string, string) (domain.Player, error)
 	GetPlayerByGameRunAndEmail(context.Context, string, string) (domain.Player, error)
 	UpdatePlayerConnectionState(context.Context, db.UpdatePlayerConnectionStateParams) (domain.Player, error)
+	MarkStalePlayersDisconnected(context.Context, db.MarkStalePlayersDisconnectedParams) ([]domain.Player, error)
 	ListWordSetWords(context.Context, string) ([]domain.WordSetWord, error)
 	CreateCalledWord(context.Context, db.CreateCalledWordParams) (domain.CalledWord, error)
 	ListCalledWords(context.Context, string) ([]domain.CalledWord, error)
@@ -446,26 +447,35 @@ type JoinPlayerInput struct {
 	DisplayName string
 }
 
-func (s *Service) JoinPlayer(ctx context.Context, input JoinPlayerInput) (domain.Player, error) {
+type PlayerConnectionUpdate struct {
+	Player          domain.Player
+	ReconnectNotice *domain.ReconnectNotice
+}
+
+func (s *Service) JoinPlayer(ctx context.Context, input JoinPlayerInput) (PlayerConnectionUpdate, error) {
 	email := normalizeEmail(input.Email)
 	displayName := strings.TrimSpace(input.DisplayName)
 	if email == "" || displayName == "" {
-		return domain.Player{}, fmt.Errorf("%w: email and displayName are required", ErrValidation)
+		return PlayerConnectionUpdate{}, fmt.Errorf("%w: email and displayName are required", ErrValidation)
 	}
 
 	if _, err := s.store.GetGameRun(ctx, input.GameRunID); err != nil {
-		return domain.Player{}, mapStoreError(err)
+		return PlayerConnectionUpdate{}, mapStoreError(err)
 	}
 
 	if _, err := s.store.GetAllowedPlayerByEmail(ctx, input.GameRunID, email); err != nil {
 		if errors.Is(err, db.ErrNotFound) {
-			return domain.Player{}, ErrNotAllowed
+			return PlayerConnectionUpdate{}, ErrNotAllowed
 		}
-		return domain.Player{}, err
+		return PlayerConnectionUpdate{}, err
 	}
 
 	existing, err := s.store.GetPlayerByGameRunAndEmail(ctx, input.GameRunID, email)
 	if err == nil {
+		notice, err := s.reconnectNotice(ctx, input.GameRunID, existing, existing.ConnectionState != "online")
+		if err != nil {
+			return PlayerConnectionUpdate{}, err
+		}
 		updated, err := s.store.UpdatePlayerConnectionState(ctx, db.UpdatePlayerConnectionStateParams{
 			GameRunID:       input.GameRunID,
 			PlayerID:        existing.ID,
@@ -473,13 +483,13 @@ func (s *Service) JoinPlayer(ctx context.Context, input JoinPlayerInput) (domain
 			EventType:       "player.reconnected",
 		})
 		if err != nil {
-			return domain.Player{}, mapStoreError(err)
+			return PlayerConnectionUpdate{}, mapStoreError(err)
 		}
-		s.emit(ctx, events.Event{Type: "player.reconnected", EntityID: updated.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "playerId": updated.ID, "connectionState": updated.ConnectionState}})
-		return updated, nil
+		s.emit(ctx, events.Event{Type: "player.reconnected", EntityID: updated.ID, Payload: reconnectPayload(input.GameRunID, updated.ID, updated.ConnectionState, notice)})
+		return PlayerConnectionUpdate{Player: updated, ReconnectNotice: notice}, nil
 	}
 	if !errors.Is(err, db.ErrNotFound) {
-		return domain.Player{}, err
+		return PlayerConnectionUpdate{}, err
 	}
 
 	player, err := s.store.CreatePlayer(ctx, db.CreatePlayerParams{
@@ -491,27 +501,32 @@ func (s *Service) JoinPlayer(ctx context.Context, input JoinPlayerInput) (domain
 	})
 	if err != nil {
 		if errors.Is(err, db.ErrConflict) {
-			return s.store.GetPlayerByGameRunAndEmail(ctx, input.GameRunID, email)
+			player, err := s.store.GetPlayerByGameRunAndEmail(ctx, input.GameRunID, email)
+			return PlayerConnectionUpdate{Player: player}, err
 		}
-		return domain.Player{}, err
+		return PlayerConnectionUpdate{}, err
 	}
 
 	s.emit(ctx, events.Event{Type: "player.joined", EntityID: player.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "email": player.Email}})
-	return player, nil
+	return PlayerConnectionUpdate{Player: player}, nil
 }
 
-func (s *Service) HeartbeatPlayer(ctx context.Context, principal auth.Principal, gameRunID, playerID string) (domain.Player, error) {
+func (s *Service) HeartbeatPlayer(ctx context.Context, principal auth.Principal, gameRunID, playerID string) (PlayerConnectionUpdate, error) {
 	player, err := s.store.GetPlayer(ctx, gameRunID, playerID)
 	if err != nil {
-		return domain.Player{}, mapStoreError(err)
+		return PlayerConnectionUpdate{}, mapStoreError(err)
 	}
 	if !canActForPlayer(principal, player) {
-		return domain.Player{}, ErrForbidden
+		return PlayerConnectionUpdate{}, ErrForbidden
 	}
 
 	eventType := ""
 	if player.ConnectionState != "online" {
 		eventType = "player.reconnected"
+	}
+	notice, err := s.reconnectNotice(ctx, gameRunID, player, eventType != "")
+	if err != nil {
+		return PlayerConnectionUpdate{}, err
 	}
 	updated, err := s.store.UpdatePlayerConnectionState(ctx, db.UpdatePlayerConnectionStateParams{
 		GameRunID:       gameRunID,
@@ -520,13 +535,13 @@ func (s *Service) HeartbeatPlayer(ctx context.Context, principal auth.Principal,
 		EventType:       eventType,
 	})
 	if err != nil {
-		return domain.Player{}, mapStoreError(err)
+		return PlayerConnectionUpdate{}, mapStoreError(err)
 	}
 	if eventType != "" {
-		s.emit(ctx, events.Event{Type: eventType, EntityID: updated.ID, Payload: map[string]any{"gameRunId": gameRunID, "playerId": updated.ID, "connectionState": updated.ConnectionState}})
+		s.emit(ctx, events.Event{Type: eventType, EntityID: updated.ID, Payload: reconnectPayload(gameRunID, updated.ID, updated.ConnectionState, notice)})
 	}
 
-	return updated, nil
+	return PlayerConnectionUpdate{Player: updated, ReconnectNotice: notice}, nil
 }
 
 func (s *Service) AssignPlayerCard(ctx context.Context, gameRunID, playerID string) (domain.BingoCard, error) {
@@ -779,6 +794,10 @@ func (s *Service) GetPlayerSnapshot(ctx context.Context, principal auth.Principa
 	if player.ConnectionState != "online" {
 		eventType = "player.reconnected"
 	}
+	notice, err := s.reconnectNotice(ctx, gameRunID, player, eventType != "")
+	if err != nil {
+		return domain.PlayerSnapshot{}, err
+	}
 	player, err = s.store.UpdatePlayerConnectionState(ctx, db.UpdatePlayerConnectionStateParams{
 		GameRunID:       gameRunID,
 		PlayerID:        playerID,
@@ -789,7 +808,7 @@ func (s *Service) GetPlayerSnapshot(ctx context.Context, principal auth.Principa
 		return domain.PlayerSnapshot{}, mapStoreError(err)
 	}
 	if eventType != "" {
-		s.emit(ctx, events.Event{Type: eventType, EntityID: player.ID, Payload: map[string]any{"gameRunId": gameRunID, "playerId": player.ID, "connectionState": player.ConnectionState}})
+		s.emit(ctx, events.Event{Type: eventType, EntityID: player.ID, Payload: reconnectPayload(gameRunID, player.ID, player.ConnectionState, notice)})
 	}
 
 	card, err := s.store.GetPlayerCard(ctx, playerID)
@@ -830,16 +849,45 @@ func (s *Service) GetPlayerSnapshot(ctx context.Context, principal auth.Principa
 	}
 
 	return domain.PlayerSnapshot{
-		GameRun:     run,
-		Status:      run.Status,
-		CurrentWord: currentWord,
-		Pattern:     winningPatternOrDefault(run),
-		Player:      player,
-		Card:        cardPtr,
-		CalledWords: calledWords,
-		Claims:      playerClaims,
-		Winners:     winners,
+		GameRun:         run,
+		Status:          run.Status,
+		CurrentWord:     currentWord,
+		Pattern:         winningPatternOrDefault(run),
+		Player:          player,
+		Card:            cardPtr,
+		CalledWords:     calledWords,
+		Claims:          playerClaims,
+		Winners:         winners,
+		ReconnectNotice: notice,
 	}, nil
+}
+
+func (s *Service) SweepStalePlayerConnections(ctx context.Context, timeout time.Duration, limit int) ([]domain.Player, error) {
+	if timeout <= 0 {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	cutoff := s.clock.Now().Add(-timeout)
+	players, err := s.store.MarkStalePlayersDisconnected(ctx, db.MarkStalePlayersDisconnectedParams{
+		Cutoff: cutoff,
+		Limit:  limit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, player := range players {
+		s.emit(ctx, events.Event{Type: "player.disconnected", EntityID: player.ID, Payload: map[string]any{
+			"gameRunId":       player.GameRunID,
+			"playerId":        player.ID,
+			"connectionState": player.ConnectionState,
+			"lastSeenAt":      player.LastSeenAt,
+		}})
+	}
+
+	return players, nil
 }
 
 func (s *Service) ListGameEvents(ctx context.Context, gameRunID string, afterSequence int64, limit int) ([]domain.GameEvent, error) {
@@ -856,6 +904,42 @@ func (s *Service) Authenticate(r *http.Request) (auth.Principal, error) {
 
 func canActForPlayer(principal auth.Principal, player domain.Player) bool {
 	return auth.HasRole(principal, "admin", "host") || strings.EqualFold(principal.Email, player.Email)
+}
+
+func (s *Service) reconnectNotice(ctx context.Context, gameRunID string, player domain.Player, reconnected bool) (*domain.ReconnectNotice, error) {
+	if !reconnected {
+		return nil, nil
+	}
+
+	calledWords, err := s.store.ListCalledWords(ctx, gameRunID)
+	if err != nil {
+		return nil, err
+	}
+	missed := make([]domain.CalledWord, 0)
+	for _, calledWord := range calledWords {
+		if calledWord.CalledAt.After(player.LastSeenAt) {
+			missed = append(missed, calledWord)
+		}
+	}
+
+	return &domain.ReconnectNotice{
+		LastSeenAt:        player.LastSeenAt,
+		MissedCalledWords: missed,
+	}, nil
+}
+
+func reconnectPayload(gameRunID, playerID, connectionState string, notice *domain.ReconnectNotice) map[string]any {
+	payload := map[string]any{
+		"gameRunId":       gameRunID,
+		"playerId":        playerID,
+		"connectionState": connectionState,
+	}
+	if notice != nil {
+		payload["lastSeenAt"] = notice.LastSeenAt
+		payload["missedCalledWordCount"] = len(notice.MissedCalledWords)
+	}
+
+	return payload
 }
 
 func makeCardCells(seed string, words []domain.WordSetWord) []db.CreateCardCellParams {

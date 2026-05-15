@@ -164,13 +164,19 @@ type HostSnapshot struct {
 }
 
 type PlayerSnapshot struct {
-	GameRun     GameRun
-	Status      string
-	CurrentWord *CalledWord
-	Pattern     string
-	Player      Player
-	Card        *BingoCard
-	CalledWords []CalledWord
-	Claims      []BingoClaim
-	Winners     []Winner
+	GameRun         GameRun
+	Status          string
+	CurrentWord     *CalledWord
+	Pattern         string
+	Player          Player
+	Card            *BingoCard
+	CalledWords     []CalledWord
+	Claims          []BingoClaim
+	Winners         []Winner
+	ReconnectNotice *ReconnectNotice
+}
+
+type ReconnectNotice struct {
+	LastSeenAt        time.Time
+	MissedCalledWords []CalledWord
 }
