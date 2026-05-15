@@ -182,6 +182,111 @@ func TestAPIGameAllowlistJoinAndCardFlow(t *testing.T) {
 	}
 }
 
+func TestAPIPlayerReconnectHeartbeatAndAuthorization(t *testing.T) {
+	ctx := context.Background()
+	databaseURL := createTestDatabase(t)
+	if err := db.RunMigrationsFromPath(databaseURL, "../db/migrations", db.MigrationUp); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	pool, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	defer pool.Close()
+
+	wordSetID := insertAPIWordSet(t, ctx, pool)
+	handler := NewServer(config.Config{AppEnv: "test", DatabaseURL: databaseURL}, testLogger(), pool).Handler
+	gameID := createAPIGame(t, handler, "Reconnect Test Game", "RECONNECT-TEST", wordSetID, nil)
+	playerID, _ := allowJoinAndAssignCard(t, handler, gameID, "reconnect@example.local", "Reconnect Player")
+	initialPlayer := playerFromData(t, doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/players", map[string]any{
+		"email":       "reconnect@example.local",
+		"displayName": "Reconnect Player",
+	}).Body)
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE players
+		SET connection_state = 'offline',
+		    last_seen_at = now() - interval '1 hour',
+		    updated_at = now()
+		WHERE id = $1
+	`, playerID); err != nil {
+		t.Fatalf("force player offline: %v", err)
+	}
+
+	rejoinResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/players", map[string]any{
+		"email":       "reconnect@example.local",
+		"displayName": "Reconnect Player",
+	})
+	if rejoinResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected rejoin 201, got %d: %s", rejoinResp.StatusCode, rejoinResp.Body)
+	}
+	rejoined := playerFromData(t, rejoinResp.Body)
+	if rejoined.ID != playerID || rejoined.ConnectionState != "online" || !rejoined.LastSeenAt.After(initialPlayer.LastSeenAt) {
+		t.Fatalf("expected rejoin to refresh existing online player, got %+v from initial %+v", rejoined, initialPlayer)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE players
+		SET connection_state = 'offline',
+		    last_seen_at = now() - interval '1 hour',
+		    updated_at = now()
+		WHERE id = $1
+	`, playerID); err != nil {
+		t.Fatalf("force player offline before heartbeat: %v", err)
+	}
+
+	heartbeatResp := doRequestWithDevAuth(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/players/"+playerID+"/heartbeat", nil, "reconnect@example.local", "Reconnect Player", "player")
+	if heartbeatResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected heartbeat 200, got %d: %s", heartbeatResp.StatusCode, heartbeatResp.Body)
+	}
+	heartbeatPlayer := playerFromData(t, heartbeatResp.Body)
+	if heartbeatPlayer.ConnectionState != "online" || !heartbeatPlayer.LastSeenAt.After(rejoined.LastSeenAt) {
+		t.Fatalf("expected heartbeat to refresh player, got %+v after %+v", heartbeatPlayer, rejoined)
+	}
+
+	blockedHeartbeatResp := doRequestWithDevAuth(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/players/"+playerID+"/heartbeat", nil, "other@example.local", "Other Player", "player")
+	if blockedHeartbeatResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected other player heartbeat 403, got %d: %s", blockedHeartbeatResp.StatusCode, blockedHeartbeatResp.Body)
+	}
+
+	if _, err := pool.Exec(ctx, `
+		UPDATE players
+		SET connection_state = 'offline',
+		    last_seen_at = now() - interval '1 hour',
+		    updated_at = now()
+		WHERE id = $1
+	`, playerID); err != nil {
+		t.Fatalf("force player offline before snapshot: %v", err)
+	}
+
+	playerSnapshotResp := doRequestWithDevAuth(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/players/"+playerID+"/snapshot", nil, "reconnect@example.local", "Reconnect Player", "player")
+	if playerSnapshotResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected player snapshot 200, got %d: %s", playerSnapshotResp.StatusCode, playerSnapshotResp.Body)
+	}
+	playerSnapshot := playerSnapshotFromData(t, playerSnapshotResp.Body)
+	if playerSnapshot.Player.ConnectionState != "online" || !playerSnapshot.Player.LastSeenAt.After(heartbeatPlayer.LastSeenAt) {
+		t.Fatalf("expected player snapshot to reconnect player, got %+v", playerSnapshot.Player)
+	}
+
+	blockedSnapshotResp := doRequestWithDevAuth(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/players/"+playerID+"/snapshot", nil, "other@example.local", "Other Player", "player")
+	if blockedSnapshotResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected other player snapshot 403, got %d: %s", blockedSnapshotResp.StatusCode, blockedSnapshotResp.Body)
+	}
+
+	hostSnapshotResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/host-snapshot", nil)
+	if hostSnapshotResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected host snapshot 200, got %d: %s", hostSnapshotResp.StatusCode, hostSnapshotResp.Body)
+	}
+	hostSnapshot := hostSnapshotFromData(t, hostSnapshotResp.Body)
+	if len(hostSnapshot.Players) != 1 || hostSnapshot.Players[0].ConnectionState != "online" || hostSnapshot.Players[0].LastSeenAt.IsZero() {
+		t.Fatalf("expected host snapshot connection fields, got %+v", hostSnapshot.Players)
+	}
+
+	events := gameEventsFromDB(t, ctx, pool, gameID)
+	assertEventTypes(t, events, []string{"player.joined", "player.reconnected"})
+}
+
 func TestAPIGameplayFlow(t *testing.T) {
 	ctx := context.Background()
 	databaseURL := createTestDatabase(t)
@@ -715,6 +820,40 @@ func doRequestWithoutDevAuth(t *testing.T, handler http.Handler, method, path st
 	return testResponse{StatusCode: resp.StatusCode, Body: string(responseBody)}
 }
 
+func doRequestWithDevAuth(t *testing.T, handler http.Handler, method, path string, body any, email, name, role string) testResponse {
+	t.Helper()
+
+	var reader io.Reader
+	if body != nil {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal request: %v", err)
+		}
+		reader = bytes.NewReader(payload)
+	}
+
+	req := httptest.NewRequest(method, path, reader)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("X-Dev-User-Email", email)
+	req.Header.Set("X-Dev-User-Name", name)
+	req.Header.Set("X-Dev-User-Role", role)
+	req.Header.Set("X-Request-ID", "test-request-id")
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	resp := recorder.Result()
+	defer resp.Body.Close()
+
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
+	}
+
+	return testResponse{StatusCode: resp.StatusCode, Body: string(responseBody)}
+}
+
 func doRequestForConcurrent(handler http.Handler, method, path string, body any) testResponse {
 	var reader io.Reader
 	if body != nil {
@@ -818,8 +957,10 @@ type apiSummary struct {
 }
 
 type apiPlayer struct {
-	ID    string `json:"id"`
-	State string `json:"state"`
+	ID              string    `json:"id"`
+	ConnectionState string    `json:"connectionState"`
+	State           string    `json:"state"`
+	LastSeenAt      time.Time `json:"lastSeenAt"`
 }
 
 type apiHostSnapshot struct {
@@ -871,6 +1012,19 @@ func cardFromData(t *testing.T, body string) apiCard {
 	}
 	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
 		t.Fatalf("decode card response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func playerFromData(t *testing.T, body string) apiPlayer {
+	t.Helper()
+
+	var envelope struct {
+		Data apiPlayer `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode player response: %v", err)
 	}
 
 	return envelope.Data
