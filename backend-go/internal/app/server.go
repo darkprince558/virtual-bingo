@@ -38,7 +38,7 @@ func NewServer(cfg config.Config, logger *slog.Logger, database *db.Pool) *http.
 		store := db.NewStore(database)
 		service = game.NewService(game.ServiceConfig{
 			Store:         store,
-			Authenticator: auth.DevAuthenticator{Enabled: true},
+			Authenticator: newAuthenticator(cfg),
 			Publisher:     events.NoopPublisher{},
 			AuditLogger:   audit.NewStoreLogger(store),
 			Clock:         clock.SystemClock{},
@@ -57,4 +57,17 @@ func NewServer(cfg config.Config, logger *slog.Logger, database *db.Pool) *http.
 		Handler:           appServer.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 	}
+}
+
+func newAuthenticator(cfg config.Config) auth.Authenticator {
+	return auth.NewAuthenticator(auth.Options{
+		Mode: cfg.AuthMode,
+		EntraConfig: auth.EntraConfig{
+			TenantID: cfg.EntraTenantID,
+			ClientID: cfg.EntraClientID,
+			Audience: cfg.EntraAudience,
+			Issuer:   cfg.EntraIssuer,
+			JWKSURL:  cfg.EntraJWKSURL,
+		},
+	})
 }

@@ -46,6 +46,44 @@ func TestAPIHealthAndVersionWithoutDatabase(t *testing.T) {
 	}
 }
 
+func TestAPIAuthModeSelectionAndUnauthorizedEnvelope(t *testing.T) {
+	ctx := context.Background()
+	databaseURL := createTestDatabase(t)
+	if err := db.RunMigrationsFromPath(databaseURL, "../db/migrations", db.MigrationUp); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	pool, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	defer pool.Close()
+
+	wordSetID := insertAPIWordSet(t, ctx, pool)
+	devHandler := NewServer(config.Config{AppEnv: "test", DatabaseURL: databaseURL, AuthMode: "dev"}, testLogger(), pool).Handler
+	devResp := doRequest(t, devHandler, http.MethodPost, "/api/v1/games", map[string]any{
+		"name":      "Dev Auth Game",
+		"code":      "DEV-AUTH",
+		"wordSetId": wordSetID,
+	})
+	if devResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected dev auth create game 201, got %d: %s", devResp.StatusCode, devResp.Body)
+	}
+
+	entraReadyHandler := NewServer(config.Config{AppEnv: "test", DatabaseURL: databaseURL, AuthMode: "entra-ready"}, testLogger(), pool).Handler
+	unauthorizedResp := doRequestWithoutDevAuth(t, entraReadyHandler, http.MethodPost, "/api/v1/games", map[string]any{
+		"name":      "Blocked Auth Game",
+		"code":      "BLOCKED-AUTH",
+		"wordSetId": wordSetID,
+	})
+	if unauthorizedResp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected entra-ready without verifier/token to return 401, got %d: %s", unauthorizedResp.StatusCode, unauthorizedResp.Body)
+	}
+	if !strings.Contains(unauthorizedResp.Body, `"error"`) || !strings.Contains(unauthorizedResp.Body, `"code":"unauthorized"`) {
+		t.Fatalf("expected unauthorized error envelope, got %s", unauthorizedResp.Body)
+	}
+}
+
 func TestAPIGameAllowlistJoinAndCardFlow(t *testing.T) {
 	ctx := context.Background()
 	databaseURL := createTestDatabase(t)
@@ -641,6 +679,37 @@ func doRequest(t *testing.T, handler http.Handler, method, path string, body any
 
 	if got := resp.Header.Get("X-Request-ID"); got != "test-request-id" {
 		t.Fatalf("expected request id response header, got %q", got)
+	}
+
+	return testResponse{StatusCode: resp.StatusCode, Body: string(responseBody)}
+}
+
+func doRequestWithoutDevAuth(t *testing.T, handler http.Handler, method, path string, body any) testResponse {
+	t.Helper()
+
+	var reader io.Reader
+	if body != nil {
+		payload, err := json.Marshal(body)
+		if err != nil {
+			t.Fatalf("marshal request: %v", err)
+		}
+		reader = bytes.NewReader(payload)
+	}
+
+	req := httptest.NewRequest(method, path, reader)
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	req.Header.Set("X-Request-ID", "test-request-id")
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	resp := recorder.Result()
+	defer resp.Body.Close()
+
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read response: %v", err)
 	}
 
 	return testResponse{StatusCode: resp.StatusCode, Body: string(responseBody)}

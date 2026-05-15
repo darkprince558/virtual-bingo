@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -17,6 +18,29 @@ type Principal struct {
 
 type Authenticator interface {
 	Authenticate(*http.Request) (Principal, error)
+}
+
+type Mode string
+
+const (
+	ModeDev        Mode = "dev"
+	ModeEntraReady Mode = "entra-ready"
+)
+
+type Options struct {
+	Mode          string
+	EntraConfig   EntraConfig
+	TokenVerifier TokenVerifier
+	RoleMapper    RoleMapper
+}
+
+func NewAuthenticator(options Options) Authenticator {
+	switch Mode(strings.ToLower(strings.TrimSpace(options.Mode))) {
+	case ModeEntraReady:
+		return NewEntraReadyAuthenticator(options.EntraConfig, options.TokenVerifier, options.RoleMapper)
+	default:
+		return DevAuthenticator{Enabled: true}
+	}
 }
 
 type DevAuthenticator struct {
@@ -75,4 +99,10 @@ func HasRole(principal Principal, allowedRoles ...string) bool {
 	}
 
 	return false
+}
+
+type VerifierFunc func(context.Context, string) (TokenClaims, error)
+
+func (f VerifierFunc) VerifyToken(ctx context.Context, token string) (TokenClaims, error) {
+	return f(ctx, token)
 }
