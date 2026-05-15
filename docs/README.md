@@ -6,6 +6,7 @@
 - `architecture/AUTONOMOUS_BACKEND_ARCHITECTURE.md` - product and backend architecture decisions.
 - `architecture/GO_BACKEND_PLAN.md` - lower-level Go backend implementation plan.
 - `architecture/V1_IMPLEMENTATION_PLAN.md` - production V1 build order and next realtime/game-engine milestones.
+- `architecture/FULL_SCALE_DEPLOYMENT_ROADMAP.md` - full CGI/Azure/Microsoft 365/AI/rewards deployment roadmap beyond V1.
 - `architecture/V1_REALTIME_BACKBONE_PROMPT.md` - ready-to-use prompt for the next realtime backend implementation pass.
 
 ## Supporting Docs

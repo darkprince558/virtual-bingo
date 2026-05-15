@@ -4,6 +4,8 @@ Last updated: 2026-05-15
 
 This plan turns the architecture docs into a production V1 path for Virtual Bingo. The project is no longer being treated as a throwaway prototype. The goal is a full-scale ready application foundation: correct game state, realtime playability for at least 50 players per game, production authentication seams, autonomous operations, AI voice/content seams, auditability, and Azure-ready deployment discipline.
 
+For the larger CGI-only Microsoft 365, Azure, AI caller, Redis/WebSocket, weekly automation, and rewards roadmap beyond this V1 game foundation, see `FULL_SCALE_DEPLOYMENT_ROADMAP.md`.
+
 ## Production V1 Scope
 
 Production V1 should support one real internal game flow end to end:
