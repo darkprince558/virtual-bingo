@@ -40,7 +40,9 @@ type Store interface {
 	ListAllowedPlayers(context.Context, string) ([]domain.AllowedPlayer, error)
 	GetAllowedPlayerByEmail(context.Context, string, string) (domain.AllowedPlayer, error)
 	CreatePlayer(context.Context, db.CreatePlayerParams) (domain.Player, error)
+	GetPlayer(context.Context, string, string) (domain.Player, error)
 	GetPlayerByGameRunAndEmail(context.Context, string, string) (domain.Player, error)
+	UpdatePlayerConnectionState(context.Context, db.UpdatePlayerConnectionStateParams) (domain.Player, error)
 	ListWordSetWords(context.Context, string) ([]domain.WordSetWord, error)
 	CreateCalledWord(context.Context, db.CreateCalledWordParams) (domain.CalledWord, error)
 	ListCalledWords(context.Context, string) ([]domain.CalledWord, error)
@@ -464,7 +466,17 @@ func (s *Service) JoinPlayer(ctx context.Context, input JoinPlayerInput) (domain
 
 	existing, err := s.store.GetPlayerByGameRunAndEmail(ctx, input.GameRunID, email)
 	if err == nil {
-		return existing, nil
+		updated, err := s.store.UpdatePlayerConnectionState(ctx, db.UpdatePlayerConnectionStateParams{
+			GameRunID:       input.GameRunID,
+			PlayerID:        existing.ID,
+			ConnectionState: "online",
+			EventType:       "player.reconnected",
+		})
+		if err != nil {
+			return domain.Player{}, mapStoreError(err)
+		}
+		s.emit(ctx, events.Event{Type: "player.reconnected", EntityID: updated.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "playerId": updated.ID, "connectionState": updated.ConnectionState}})
+		return updated, nil
 	}
 	if !errors.Is(err, db.ErrNotFound) {
 		return domain.Player{}, err
@@ -486,6 +498,35 @@ func (s *Service) JoinPlayer(ctx context.Context, input JoinPlayerInput) (domain
 
 	s.emit(ctx, events.Event{Type: "player.joined", EntityID: player.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "email": player.Email}})
 	return player, nil
+}
+
+func (s *Service) HeartbeatPlayer(ctx context.Context, principal auth.Principal, gameRunID, playerID string) (domain.Player, error) {
+	player, err := s.store.GetPlayer(ctx, gameRunID, playerID)
+	if err != nil {
+		return domain.Player{}, mapStoreError(err)
+	}
+	if !canActForPlayer(principal, player) {
+		return domain.Player{}, ErrForbidden
+	}
+
+	eventType := ""
+	if player.ConnectionState != "online" {
+		eventType = "player.reconnected"
+	}
+	updated, err := s.store.UpdatePlayerConnectionState(ctx, db.UpdatePlayerConnectionStateParams{
+		GameRunID:       gameRunID,
+		PlayerID:        playerID,
+		ConnectionState: "online",
+		EventType:       eventType,
+	})
+	if err != nil {
+		return domain.Player{}, mapStoreError(err)
+	}
+	if eventType != "" {
+		s.emit(ctx, events.Event{Type: eventType, EntityID: updated.ID, Payload: map[string]any{"gameRunId": gameRunID, "playerId": updated.ID, "connectionState": updated.ConnectionState}})
+	}
+
+	return updated, nil
 }
 
 func (s *Service) AssignPlayerCard(ctx context.Context, gameRunID, playerID string) (domain.BingoCard, error) {
@@ -727,25 +768,28 @@ func (s *Service) GetPlayerSnapshot(ctx context.Context, principal auth.Principa
 		return domain.PlayerSnapshot{}, mapStoreError(err)
 	}
 
-	players, err := s.store.ListPlayers(ctx, gameRunID)
+	player, err := s.store.GetPlayer(ctx, gameRunID, playerID)
 	if err != nil {
-		return domain.PlayerSnapshot{}, err
+		return domain.PlayerSnapshot{}, mapStoreError(err)
 	}
-
-	var player domain.Player
-	found := false
-	for _, candidate := range players {
-		if candidate.ID == playerID {
-			player = candidate
-			found = true
-			break
-		}
-	}
-	if !found {
-		return domain.PlayerSnapshot{}, ErrNotFound
-	}
-	if !auth.HasRole(principal, "admin", "host") && !strings.EqualFold(principal.Email, player.Email) {
+	if !canActForPlayer(principal, player) {
 		return domain.PlayerSnapshot{}, ErrForbidden
+	}
+	eventType := ""
+	if player.ConnectionState != "online" {
+		eventType = "player.reconnected"
+	}
+	player, err = s.store.UpdatePlayerConnectionState(ctx, db.UpdatePlayerConnectionStateParams{
+		GameRunID:       gameRunID,
+		PlayerID:        playerID,
+		ConnectionState: "online",
+		EventType:       eventType,
+	})
+	if err != nil {
+		return domain.PlayerSnapshot{}, mapStoreError(err)
+	}
+	if eventType != "" {
+		s.emit(ctx, events.Event{Type: eventType, EntityID: player.ID, Payload: map[string]any{"gameRunId": gameRunID, "playerId": player.ID, "connectionState": player.ConnectionState}})
 	}
 
 	card, err := s.store.GetPlayerCard(ctx, playerID)
@@ -808,6 +852,10 @@ func (s *Service) ListGameEvents(ctx context.Context, gameRunID string, afterSeq
 
 func (s *Service) Authenticate(r *http.Request) (auth.Principal, error) {
 	return s.authenticator.Authenticate(r)
+}
+
+func canActForPlayer(principal auth.Principal, player domain.Player) bool {
+	return auth.HasRole(principal, "admin", "host") || strings.EqualFold(principal.Email, player.Email)
 }
 
 func makeCardCells(seed string, words []domain.WordSetWord) []db.CreateCardCellParams {

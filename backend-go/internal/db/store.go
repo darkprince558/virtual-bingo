@@ -359,6 +359,74 @@ func (s *Store) GetPlayerByGameRunAndEmail(ctx context.Context, gameRunID, email
 	return scanPlayer(row)
 }
 
+func (s *Store) GetPlayer(ctx context.Context, gameRunID, playerID string) (domain.Player, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id::text, game_run_id::text, user_id::text, email, display_name, connection_state, state, joined_at, last_seen_at, created_at, updated_at
+		FROM players
+		WHERE game_run_id = $1 AND id = $2
+	`, gameRunID, playerID)
+
+	return scanPlayer(row)
+}
+
+type UpdatePlayerConnectionStateParams struct {
+	GameRunID       string
+	PlayerID        string
+	ConnectionState string
+	EventType       string
+}
+
+func (s *Store) UpdatePlayerConnectionState(ctx context.Context, params UpdatePlayerConnectionStateParams) (domain.Player, error) {
+	connectionState := strings.TrimSpace(params.ConnectionState)
+	if connectionState == "" {
+		connectionState = "online"
+	}
+
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.Player{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := getGameRunForUpdate(ctx, tx, params.GameRunID); err != nil {
+		return domain.Player{}, mapWriteError(err)
+	}
+
+	row := tx.QueryRow(ctx, `
+		UPDATE players
+		SET connection_state = $3,
+		    state = CASE
+		      WHEN $3 = 'disconnected' AND state <> 'confirmed_winner' THEN 'disconnected'
+		      WHEN $3 = 'online' AND state = 'disconnected' THEN 'joined'
+		      ELSE state
+		    END,
+		    last_seen_at = now(),
+		    updated_at = now()
+		WHERE game_run_id = $1
+		  AND id = $2
+		RETURNING id::text, game_run_id::text, user_id::text, email, display_name, connection_state, state, joined_at, last_seen_at, created_at, updated_at
+	`, params.GameRunID, params.PlayerID, connectionState)
+	player, err := scanPlayer(row)
+	if err != nil {
+		return domain.Player{}, mapWriteError(err)
+	}
+
+	if params.EventType != "" {
+		if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, params.EventType, &player.ID, map[string]any{
+			"playerId":        player.ID,
+			"connectionState": player.ConnectionState,
+		}); err != nil {
+			return domain.Player{}, err
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.Player{}, mapWriteError(err)
+	}
+
+	return player, nil
+}
+
 func (s *Store) ListWordSetWords(ctx context.Context, wordSetID string) ([]domain.WordSetWord, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id::text, word_set_id::text, word, sort_order, is_active, created_at
