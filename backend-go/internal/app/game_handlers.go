@@ -414,6 +414,26 @@ func (s *Server) getPlayerSnapshot(w http.ResponseWriter, r *http.Request) {
 	writeData(w, http.StatusOK, playerSnapshotResponseFromDomain(snapshot))
 }
 
+func (s *Server) heartbeatPlayer(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	player, err := s.service.HeartbeatPlayer(r.Context(), principal, r.PathValue("gameID"), r.PathValue("playerID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, playerResponseFromDomain(player))
+}
+
 func (s *Server) streamGameEvents(w http.ResponseWriter, r *http.Request) {
 	if !requireDatabase(w, s.service) {
 		return
