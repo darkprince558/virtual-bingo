@@ -33,10 +33,17 @@ type Store interface {
 	UpsertUserFromPrincipal(context.Context, auth.Principal) (domain.User, error)
 	CreateGameRun(context.Context, db.CreateGameRunParams) (domain.GameRun, error)
 	GetGameRun(context.Context, string) (domain.GameRun, error)
+	GetGameRunByCode(context.Context, string) (domain.GameRun, error)
+	ListGameRuns(context.Context, db.ListGameRunsParams) ([]domain.GameRunSummary, error)
+	UpdateGameRun(context.Context, db.UpdateGameRunParams) (domain.GameRun, error)
 	UpdateGameRunStatus(context.Context, string, string, *time.Time, *time.Time) (domain.GameRun, error)
 	TransitionGameRunStatus(context.Context, db.GameStatusTransitionParams) (domain.GameRun, error)
 	CountAllowedPlayers(context.Context, string) (int, error)
+	CountPlayers(context.Context, string) (int, error)
 	AddAllowedPlayer(context.Context, db.AddAllowedPlayerParams) (domain.AllowedPlayer, error)
+	BulkAddAllowedPlayers(context.Context, db.BulkAddAllowedPlayersParams) ([]domain.AllowedPlayer, error)
+	UpdateAllowedPlayer(context.Context, db.UpdateAllowedPlayerParams) (domain.AllowedPlayer, error)
+	DeleteAllowedPlayer(context.Context, string, string) (domain.AllowedPlayer, error)
 	ListAllowedPlayers(context.Context, string) ([]domain.AllowedPlayer, error)
 	GetAllowedPlayerByEmail(context.Context, string, string) (domain.AllowedPlayer, error)
 	CreatePlayer(context.Context, db.CreatePlayerParams) (domain.Player, error)
@@ -44,7 +51,15 @@ type Store interface {
 	GetPlayerByGameRunAndEmail(context.Context, string, string) (domain.Player, error)
 	UpdatePlayerConnectionState(context.Context, db.UpdatePlayerConnectionStateParams) (domain.Player, error)
 	MarkStalePlayersDisconnected(context.Context, db.MarkStalePlayersDisconnectedParams) ([]domain.Player, error)
+	ListWordSets(context.Context, bool) ([]domain.WordSet, error)
+	GetWordSet(context.Context, string) (domain.WordSet, error)
 	ListWordSetWords(context.Context, string) ([]domain.WordSetWord, error)
+	ListWordSetWordsForManagement(context.Context, string) ([]domain.WordSetWord, error)
+	CreateWordSet(context.Context, db.CreateWordSetParams) (domain.WordSetWithWords, error)
+	UpdateWordSet(context.Context, db.UpdateWordSetParams) (domain.WordSet, error)
+	CreateWordSetWord(context.Context, db.CreateWordSetWordParams) (domain.WordSetWord, error)
+	UpdateWordSetWord(context.Context, db.UpdateWordSetWordParams) (domain.WordSetWord, error)
+	DeleteWordSetWord(context.Context, string, string) (domain.WordSetWord, error)
 	CreateCalledWord(context.Context, db.CreateCalledWordParams) (domain.CalledWord, error)
 	ListCalledWords(context.Context, string) ([]domain.CalledWord, error)
 	CreateCard(context.Context, db.CreateCardParams) (domain.BingoCard, error)
@@ -59,8 +74,8 @@ type Store interface {
 	ListWinners(context.Context, string) ([]domain.Winner, error)
 	ListPlayers(context.Context, string) ([]domain.Player, error)
 	CountWinners(context.Context, string) (int, error)
-	CountPlayers(context.Context, string) (int, error)
 	ListGameEvents(context.Context, string, int64, int) ([]domain.GameEvent, error)
+	ListActivityEvents(context.Context, string, int) ([]domain.ActivityEvent, error)
 	RecordAuditEvent(context.Context, audit.Event) error
 }
 
@@ -114,6 +129,14 @@ type CreateGameRunInput struct {
 	WordSetID        *string
 	ScheduledStartAt *time.Time
 	WinningPattern   *string
+}
+
+func (s *Service) CurrentUser(ctx context.Context, principal auth.Principal) (domain.User, error) {
+	if strings.TrimSpace(principal.Email) == "" {
+		return domain.User{}, auth.ErrUnauthenticated
+	}
+
+	return s.store.UpsertUserFromPrincipal(ctx, principal)
 }
 
 func (s *Service) CreateGameRun(ctx context.Context, principal auth.Principal, input CreateGameRunInput) (GameRunWithCounts, error) {
@@ -177,6 +200,143 @@ func (s *Service) GetGameRun(ctx context.Context, gameRunID string) (GameRunWith
 	}
 
 	return GameRunWithCounts{GameRun: run, AllowedPlayerCount: count}, nil
+}
+
+func (s *Service) GetGameRunByCode(ctx context.Context, code string) (GameRunWithCounts, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return GameRunWithCounts{}, fmt.Errorf("%w: code is required", ErrValidation)
+	}
+
+	run, err := s.store.GetGameRunByCode(ctx, code)
+	if err != nil {
+		return GameRunWithCounts{}, mapStoreError(err)
+	}
+
+	count, err := s.store.CountAllowedPlayers(ctx, run.ID)
+	if err != nil {
+		return GameRunWithCounts{}, err
+	}
+
+	return GameRunWithCounts{GameRun: run, AllowedPlayerCount: count}, nil
+}
+
+func (s *Service) ListGameRuns(ctx context.Context, principal auth.Principal, scope, status string) ([]domain.GameRunSummary, error) {
+	scope = strings.ToLower(strings.TrimSpace(scope))
+	if scope == "" {
+		if auth.HasRole(principal, "admin", "host") {
+			scope = "host"
+		} else {
+			scope = "player"
+		}
+	}
+	switch scope {
+	case "admin":
+		if !auth.HasRole(principal, "admin") {
+			return nil, ErrForbidden
+		}
+	case "host":
+		if !auth.HasRole(principal, "admin", "host") {
+			return nil, ErrForbidden
+		}
+	case "player":
+	default:
+		return nil, fmt.Errorf("%w: scope must be host, player, or admin", ErrValidation)
+	}
+
+	user, err := s.store.UpsertUserFromPrincipal(ctx, principal)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.store.ListGameRuns(ctx, db.ListGameRunsParams{
+		Scope:       scope,
+		Status:      strings.TrimSpace(status),
+		UserID:      user.ID,
+		PlayerEmail: normalizeEmail(principal.Email),
+	})
+}
+
+type UpdateGameRunInput struct {
+	GameRunID        string
+	Name             *string
+	Code             *string
+	WordSetID        *string
+	ScheduledStartAt *time.Time
+	WinningPattern   *string
+}
+
+func (s *Service) UpdateGameRun(ctx context.Context, principal auth.Principal, input UpdateGameRunInput) (GameRunWithCounts, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return GameRunWithCounts{}, ErrForbidden
+	}
+
+	user, err := s.store.UpsertUserFromPrincipal(ctx, principal)
+	if err != nil {
+		return GameRunWithCounts{}, err
+	}
+	run, err := s.store.GetGameRun(ctx, input.GameRunID)
+	if err != nil {
+		return GameRunWithCounts{}, mapStoreError(err)
+	}
+	if !auth.HasRole(principal, "admin") && run.HostUserID != user.ID {
+		return GameRunWithCounts{}, ErrForbidden
+	}
+
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" {
+			return GameRunWithCounts{}, fmt.Errorf("%w: name cannot be blank", ErrValidation)
+		}
+		input.Name = &name
+	}
+	if input.Code != nil {
+		code := strings.ToUpper(strings.TrimSpace(*input.Code))
+		if code == "" {
+			return GameRunWithCounts{}, fmt.Errorf("%w: code cannot be blank", ErrValidation)
+		}
+		input.Code = &code
+	}
+	if input.WordSetID != nil {
+		wordSetID := strings.TrimSpace(*input.WordSetID)
+		if wordSetID == "" {
+			return GameRunWithCounts{}, fmt.Errorf("%w: wordSetId cannot be blank", ErrValidation)
+		}
+		if _, err := s.store.GetWordSet(ctx, wordSetID); err != nil {
+			return GameRunWithCounts{}, mapStoreError(err)
+		}
+		input.WordSetID = &wordSetID
+	}
+	if input.WinningPattern != nil {
+		pattern := bingo.NormalizePattern(*input.WinningPattern)
+		if err := bingo.EnsureSupportedPattern(pattern); err != nil {
+			return GameRunWithCounts{}, fmt.Errorf("%w: %v", ErrValidation, err)
+		}
+		input.WinningPattern = &pattern
+	}
+
+	updated, err := s.store.UpdateGameRun(ctx, db.UpdateGameRunParams{
+		GameRunID:        input.GameRunID,
+		Name:             input.Name,
+		Code:             input.Code,
+		WordSetID:        input.WordSetID,
+		ScheduledStartAt: input.ScheduledStartAt,
+		WinningPattern:   input.WinningPattern,
+		ActorUserID:      &user.ID,
+	})
+	if err != nil {
+		if errors.Is(err, db.ErrConflict) {
+			return GameRunWithCounts{}, fmt.Errorf("%w: game can only be updated before it is live, paused, finished, or cancelled", ErrConflict)
+		}
+		return GameRunWithCounts{}, mapStoreError(err)
+	}
+	count, err := s.store.CountAllowedPlayers(ctx, input.GameRunID)
+	if err != nil {
+		return GameRunWithCounts{}, err
+	}
+
+	s.emit(ctx, events.Event{Type: "game.updated", EntityID: updated.ID, Payload: map[string]any{"gameRunId": updated.ID, "code": updated.Code}})
+	return GameRunWithCounts{GameRun: updated, AllowedPlayerCount: count}, nil
 }
 
 func (s *Service) StartGame(ctx context.Context, principal auth.Principal, gameRunID string) (GameRunWithCounts, error) {
@@ -402,12 +562,8 @@ type AddAllowedPlayerInput struct {
 }
 
 func (s *Service) AddAllowedPlayer(ctx context.Context, principal auth.Principal, input AddAllowedPlayerInput) (domain.AllowedPlayer, error) {
-	if !auth.HasRole(principal, "admin", "host") {
-		return domain.AllowedPlayer{}, ErrForbidden
-	}
-
-	if _, err := s.store.GetGameRun(ctx, input.GameRunID); err != nil {
-		return domain.AllowedPlayer{}, mapStoreError(err)
+	if _, err := s.authorizeHostMutation(ctx, principal, input.GameRunID); err != nil {
+		return domain.AllowedPlayer{}, err
 	}
 
 	email := normalizeEmail(input.Email)
@@ -433,12 +589,311 @@ func (s *Service) AddAllowedPlayer(ctx context.Context, principal auth.Principal
 	return player, nil
 }
 
+func (s *Service) BulkAddAllowedPlayers(ctx context.Context, principal auth.Principal, gameRunID string, rows []AddAllowedPlayerInput) ([]domain.AllowedPlayer, error) {
+	if _, err := s.authorizeHostMutation(ctx, principal, gameRunID); err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("%w: at least one allowed player is required", ErrValidation)
+	}
+
+	seen := make(map[string]struct{}, len(rows))
+	params := make([]db.AddAllowedPlayerParams, 0, len(rows))
+	for index, row := range rows {
+		email := normalizeEmail(row.Email)
+		displayName := strings.TrimSpace(row.DisplayName)
+		if email == "" || displayName == "" {
+			return nil, fmt.Errorf("%w: row %d requires email and displayName", ErrValidation, index+1)
+		}
+		if _, ok := seen[email]; ok {
+			return nil, fmt.Errorf("%w: duplicate email %s in request", ErrConflict, email)
+		}
+		seen[email] = struct{}{}
+		params = append(params, db.AddAllowedPlayerParams{
+			GameRunID:   gameRunID,
+			Email:       email,
+			DisplayName: displayName,
+			Source:      row.Source,
+		})
+	}
+
+	players, err := s.store.BulkAddAllowedPlayers(ctx, db.BulkAddAllowedPlayersParams{
+		GameRunID: gameRunID,
+		Players:   params,
+	})
+	if err != nil {
+		if errors.Is(err, db.ErrConflict) {
+			return nil, fmt.Errorf("%w: allowed player already exists", ErrConflict)
+		}
+		return nil, mapStoreError(err)
+	}
+	for _, player := range players {
+		s.emit(ctx, events.Event{Type: "allowed_player.added", EntityID: player.ID, Payload: map[string]any{"gameRunId": gameRunID, "email": player.Email}})
+	}
+
+	return players, nil
+}
+
+type UpdateAllowedPlayerInput struct {
+	GameRunID       string
+	AllowedPlayerID string
+	Email           *string
+	DisplayName     *string
+}
+
+func (s *Service) UpdateAllowedPlayer(ctx context.Context, principal auth.Principal, input UpdateAllowedPlayerInput) (domain.AllowedPlayer, error) {
+	if _, err := s.authorizeHostMutation(ctx, principal, input.GameRunID); err != nil {
+		return domain.AllowedPlayer{}, err
+	}
+	if input.Email != nil {
+		email := normalizeEmail(*input.Email)
+		if email == "" {
+			return domain.AllowedPlayer{}, fmt.Errorf("%w: email cannot be blank", ErrValidation)
+		}
+		input.Email = &email
+	}
+	if input.DisplayName != nil {
+		displayName := strings.TrimSpace(*input.DisplayName)
+		if displayName == "" {
+			return domain.AllowedPlayer{}, fmt.Errorf("%w: displayName cannot be blank", ErrValidation)
+		}
+		input.DisplayName = &displayName
+	}
+
+	player, err := s.store.UpdateAllowedPlayer(ctx, db.UpdateAllowedPlayerParams{
+		GameRunID:       input.GameRunID,
+		AllowedPlayerID: input.AllowedPlayerID,
+		Email:           input.Email,
+		DisplayName:     input.DisplayName,
+	})
+	if err != nil {
+		if errors.Is(err, db.ErrConflict) {
+			return domain.AllowedPlayer{}, fmt.Errorf("%w: allowed player already exists", ErrConflict)
+		}
+		return domain.AllowedPlayer{}, mapStoreError(err)
+	}
+
+	s.emit(ctx, events.Event{Type: "allowed_player.updated", EntityID: player.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "email": player.Email}})
+	return player, nil
+}
+
+func (s *Service) DeleteAllowedPlayer(ctx context.Context, principal auth.Principal, gameRunID, allowedPlayerID string) error {
+	if _, err := s.authorizeHostMutation(ctx, principal, gameRunID); err != nil {
+		return err
+	}
+
+	player, err := s.store.DeleteAllowedPlayer(ctx, gameRunID, allowedPlayerID)
+	if err != nil {
+		return mapStoreError(err)
+	}
+	s.emit(ctx, events.Event{Type: "allowed_player.deleted", EntityID: player.ID, Payload: map[string]any{"gameRunId": gameRunID, "email": player.Email}})
+	return nil
+}
+
 func (s *Service) ListAllowedPlayers(ctx context.Context, gameRunID string) ([]domain.AllowedPlayer, error) {
 	if _, err := s.store.GetGameRun(ctx, gameRunID); err != nil {
 		return nil, mapStoreError(err)
 	}
 
 	return s.store.ListAllowedPlayers(ctx, gameRunID)
+}
+
+func (s *Service) ListWordSets(ctx context.Context, principal auth.Principal) ([]domain.WordSetWithWords, error) {
+	approvedOnly := !auth.HasRole(principal, "admin", "host")
+	wordSets, err := s.store.ListWordSets(ctx, approvedOnly)
+	if err != nil {
+		return nil, err
+	}
+
+	result := make([]domain.WordSetWithWords, 0, len(wordSets))
+	for _, wordSet := range wordSets {
+		words, err := s.store.ListWordSetWordsForManagement(ctx, wordSet.ID)
+		if err != nil {
+			return nil, err
+		}
+		if approvedOnly && wordSet.Status != "approved" {
+			continue
+		}
+		result = append(result, domain.WordSetWithWords{WordSet: wordSet, Words: words})
+	}
+
+	return result, nil
+}
+
+func (s *Service) GetWordSet(ctx context.Context, principal auth.Principal, wordSetID string) (domain.WordSetWithWords, error) {
+	wordSet, err := s.store.GetWordSet(ctx, wordSetID)
+	if err != nil {
+		return domain.WordSetWithWords{}, mapStoreError(err)
+	}
+	if !auth.HasRole(principal, "admin", "host") && wordSet.Status != "approved" {
+		return domain.WordSetWithWords{}, ErrForbidden
+	}
+	words, err := s.store.ListWordSetWordsForManagement(ctx, wordSet.ID)
+	if err != nil {
+		return domain.WordSetWithWords{}, err
+	}
+
+	return domain.WordSetWithWords{WordSet: wordSet, Words: words}, nil
+}
+
+type WordSetWordInput struct {
+	Word      string
+	SortOrder *int
+	IsActive  *bool
+}
+
+type CreateWordSetInput struct {
+	Name   string
+	Status string
+	Source string
+	Words  []WordSetWordInput
+}
+
+func (s *Service) CreateWordSet(ctx context.Context, principal auth.Principal, input CreateWordSetInput) (domain.WordSetWithWords, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return domain.WordSetWithWords{}, ErrForbidden
+	}
+	user, err := s.store.UpsertUserFromPrincipal(ctx, principal)
+	if err != nil {
+		return domain.WordSetWithWords{}, err
+	}
+
+	name, status, source, err := normalizeWordSetFields(input.Name, input.Status, input.Source)
+	if err != nil {
+		return domain.WordSetWithWords{}, err
+	}
+	words, err := normalizeWordInputs("", input.Words)
+	if err != nil {
+		return domain.WordSetWithWords{}, err
+	}
+
+	wordSet, err := s.store.CreateWordSet(ctx, db.CreateWordSetParams{
+		Name:            name,
+		Status:          status,
+		Source:          source,
+		CreatedByUserID: &user.ID,
+		Words:           words,
+	})
+	if err != nil {
+		return domain.WordSetWithWords{}, mapStoreError(err)
+	}
+
+	return wordSet, nil
+}
+
+type UpdateWordSetInput struct {
+	WordSetID string
+	Name      *string
+	Status    *string
+	Source    *string
+}
+
+func (s *Service) UpdateWordSet(ctx context.Context, principal auth.Principal, input UpdateWordSetInput) (domain.WordSetWithWords, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return domain.WordSetWithWords{}, ErrForbidden
+	}
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" {
+			return domain.WordSetWithWords{}, fmt.Errorf("%w: name cannot be blank", ErrValidation)
+		}
+		input.Name = &name
+	}
+	if input.Status != nil {
+		status := strings.ToLower(strings.TrimSpace(*input.Status))
+		if err := ensureWordSetStatus(status); err != nil {
+			return domain.WordSetWithWords{}, err
+		}
+		input.Status = &status
+	}
+	if input.Source != nil {
+		source := strings.ToLower(strings.TrimSpace(*input.Source))
+		if err := ensureManualWordSetSource(source); err != nil {
+			return domain.WordSetWithWords{}, err
+		}
+		input.Source = &source
+	}
+
+	wordSet, err := s.store.UpdateWordSet(ctx, db.UpdateWordSetParams{
+		WordSetID: input.WordSetID,
+		Name:      input.Name,
+		Status:    input.Status,
+		Source:    input.Source,
+	})
+	if err != nil {
+		return domain.WordSetWithWords{}, mapStoreError(err)
+	}
+	words, err := s.store.ListWordSetWordsForManagement(ctx, wordSet.ID)
+	if err != nil {
+		return domain.WordSetWithWords{}, err
+	}
+
+	return domain.WordSetWithWords{WordSet: wordSet, Words: words}, nil
+}
+
+func (s *Service) CreateWordSetWord(ctx context.Context, principal auth.Principal, wordSetID string, input WordSetWordInput) (domain.WordSetWord, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return domain.WordSetWord{}, ErrForbidden
+	}
+	words, err := normalizeWordInputs(wordSetID, []WordSetWordInput{input})
+	if err != nil {
+		return domain.WordSetWord{}, err
+	}
+
+	word, err := s.store.CreateWordSetWord(ctx, words[0])
+	if err != nil {
+		return domain.WordSetWord{}, mapStoreError(err)
+	}
+
+	return word, nil
+}
+
+type UpdateWordSetWordInput struct {
+	WordSetID string
+	WordID    string
+	Word      *string
+	SortOrder *int
+	IsActive  *bool
+}
+
+func (s *Service) UpdateWordSetWord(ctx context.Context, principal auth.Principal, input UpdateWordSetWordInput) (domain.WordSetWord, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return domain.WordSetWord{}, ErrForbidden
+	}
+	if input.Word != nil {
+		word := strings.TrimSpace(*input.Word)
+		if word == "" {
+			return domain.WordSetWord{}, fmt.Errorf("%w: word cannot be blank", ErrValidation)
+		}
+		input.Word = &word
+	}
+	if input.SortOrder != nil && *input.SortOrder <= 0 {
+		return domain.WordSetWord{}, fmt.Errorf("%w: sortOrder must be positive", ErrValidation)
+	}
+
+	word, err := s.store.UpdateWordSetWord(ctx, db.UpdateWordSetWordParams{
+		WordSetID: input.WordSetID,
+		WordID:    input.WordID,
+		Word:      input.Word,
+		SortOrder: input.SortOrder,
+		IsActive:  input.IsActive,
+	})
+	if err != nil {
+		return domain.WordSetWord{}, mapStoreError(err)
+	}
+
+	return word, nil
+}
+
+func (s *Service) DeleteWordSetWord(ctx context.Context, principal auth.Principal, wordSetID, wordID string) error {
+	if !auth.HasRole(principal, "admin", "host") {
+		return ErrForbidden
+	}
+	if _, err := s.store.DeleteWordSetWord(ctx, wordSetID, wordID); err != nil {
+		return mapStoreError(err)
+	}
+
+	return nil
 }
 
 type JoinPlayerInput struct {
@@ -594,6 +1049,15 @@ func (s *Service) AssignPlayerCard(ctx context.Context, gameRunID, playerID stri
 	return card, nil
 }
 
+func (s *Service) AssignCurrentPlayerCard(ctx context.Context, principal auth.Principal, gameRunID string) (domain.BingoCard, error) {
+	player, err := s.resolveCurrentPlayer(ctx, principal, gameRunID)
+	if err != nil {
+		return domain.BingoCard{}, err
+	}
+
+	return s.AssignPlayerCard(ctx, gameRunID, player.ID)
+}
+
 func (s *Service) GetPlayerCard(ctx context.Context, gameRunID, playerID string) (domain.BingoCard, error) {
 	card, err := s.store.GetPlayerCard(ctx, playerID)
 	if err != nil {
@@ -604,6 +1068,15 @@ func (s *Service) GetPlayerCard(ctx context.Context, gameRunID, playerID string)
 	}
 
 	return card, nil
+}
+
+func (s *Service) GetCurrentPlayerCard(ctx context.Context, principal auth.Principal, gameRunID string) (domain.BingoCard, error) {
+	player, err := s.resolveCurrentPlayer(ctx, principal, gameRunID)
+	if err != nil {
+		return domain.BingoCard{}, err
+	}
+
+	return s.GetPlayerCard(ctx, gameRunID, player.ID)
 }
 
 type MarkCardCellInput struct {
@@ -630,6 +1103,16 @@ func (s *Service) MarkCardCell(ctx context.Context, input MarkCardCellInput) (do
 
 	s.emit(ctx, events.Event{Type: "card.cell_marked", EntityID: cell.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "playerId": input.PlayerID, "marked": input.Marked}})
 	return cell, nil
+}
+
+func (s *Service) MarkCurrentPlayerCardCell(ctx context.Context, principal auth.Principal, input MarkCardCellInput) (domain.BingoCardCell, error) {
+	player, err := s.resolveCurrentPlayer(ctx, principal, input.GameRunID)
+	if err != nil {
+		return domain.BingoCardCell{}, err
+	}
+	input.PlayerID = player.ID
+
+	return s.MarkCardCell(ctx, input)
 }
 
 type SubmitBingoClaimInput struct {
@@ -706,6 +1189,28 @@ func (s *Service) ListBingoClaims(ctx context.Context, gameRunID string) ([]doma
 	}
 
 	return s.store.ListBingoClaims(ctx, gameRunID)
+}
+
+func (s *Service) GetBingoClaim(ctx context.Context, principal auth.Principal, gameRunID, claimID string) (domain.BingoClaim, error) {
+	claim, err := s.store.GetBingoClaim(ctx, claimID)
+	if err != nil {
+		return domain.BingoClaim{}, mapStoreError(err)
+	}
+	if claim.GameRunID != gameRunID {
+		return domain.BingoClaim{}, ErrNotFound
+	}
+	if auth.HasRole(principal, "admin", "host") {
+		return claim, nil
+	}
+	player, err := s.store.GetPlayer(ctx, gameRunID, claim.PlayerID)
+	if err != nil {
+		return domain.BingoClaim{}, mapStoreError(err)
+	}
+	if !strings.EqualFold(player.Email, principal.Email) {
+		return domain.BingoClaim{}, ErrForbidden
+	}
+
+	return claim, nil
 }
 
 func (s *Service) GetGameSummary(ctx context.Context, gameRunID string) (domain.GameSummary, error) {
@@ -862,6 +1367,24 @@ func (s *Service) GetPlayerSnapshot(ctx context.Context, principal auth.Principa
 	}, nil
 }
 
+func (s *Service) GetCurrentPlayerSnapshot(ctx context.Context, principal auth.Principal, gameRunID string) (domain.PlayerSnapshot, error) {
+	player, err := s.resolveCurrentPlayer(ctx, principal, gameRunID)
+	if err != nil {
+		return domain.PlayerSnapshot{}, err
+	}
+
+	return s.GetPlayerSnapshot(ctx, principal, gameRunID, player.ID)
+}
+
+func (s *Service) HeartbeatCurrentPlayer(ctx context.Context, principal auth.Principal, gameRunID string) (PlayerConnectionUpdate, error) {
+	player, err := s.resolveCurrentPlayer(ctx, principal, gameRunID)
+	if err != nil {
+		return PlayerConnectionUpdate{}, err
+	}
+
+	return s.HeartbeatPlayer(ctx, principal, gameRunID, player.ID)
+}
+
 func (s *Service) SweepStalePlayerConnections(ctx context.Context, timeout time.Duration, limit int) ([]domain.Player, error) {
 	if timeout <= 0 {
 		return nil, nil
@@ -898,12 +1421,130 @@ func (s *Service) ListGameEvents(ctx context.Context, gameRunID string, afterSeq
 	return s.store.ListGameEvents(ctx, gameRunID, afterSequence, limit)
 }
 
+func (s *Service) ListActivityEvents(ctx context.Context, principal auth.Principal, gameRunID string, limit int) ([]domain.ActivityEvent, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return nil, ErrForbidden
+	}
+	if _, err := s.store.GetGameRun(ctx, gameRunID); err != nil {
+		return nil, mapStoreError(err)
+	}
+
+	return s.store.ListActivityEvents(ctx, gameRunID, limit)
+}
+
 func (s *Service) Authenticate(r *http.Request) (auth.Principal, error) {
 	return s.authenticator.Authenticate(r)
 }
 
 func canActForPlayer(principal auth.Principal, player domain.Player) bool {
 	return auth.HasRole(principal, "admin", "host") || strings.EqualFold(principal.Email, player.Email)
+}
+
+func (s *Service) resolveCurrentPlayer(ctx context.Context, principal auth.Principal, gameRunID string) (domain.Player, error) {
+	email := normalizeEmail(principal.Email)
+	if email == "" {
+		return domain.Player{}, auth.ErrUnauthenticated
+	}
+	player, err := s.store.GetPlayerByGameRunAndEmail(ctx, gameRunID, email)
+	if err != nil {
+		return domain.Player{}, mapStoreError(err)
+	}
+
+	return player, nil
+}
+
+func (s *Service) authorizeHostMutation(ctx context.Context, principal auth.Principal, gameRunID string) (domain.User, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return domain.User{}, ErrForbidden
+	}
+	user, err := s.store.UpsertUserFromPrincipal(ctx, principal)
+	if err != nil {
+		return domain.User{}, err
+	}
+	run, err := s.store.GetGameRun(ctx, gameRunID)
+	if err != nil {
+		return domain.User{}, mapStoreError(err)
+	}
+	if !auth.HasRole(principal, "admin") && run.HostUserID != user.ID {
+		return domain.User{}, ErrForbidden
+	}
+
+	return user, nil
+}
+
+func normalizeWordSetFields(name, status, source string) (string, string, string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", "", "", fmt.Errorf("%w: name is required", ErrValidation)
+	}
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status == "" {
+		status = "draft"
+	}
+	if err := ensureWordSetStatus(status); err != nil {
+		return "", "", "", err
+	}
+	source = strings.ToLower(strings.TrimSpace(source))
+	if source == "" {
+		source = "manual"
+	}
+	if err := ensureManualWordSetSource(source); err != nil {
+		return "", "", "", err
+	}
+
+	return name, status, source, nil
+}
+
+func ensureWordSetStatus(status string) error {
+	switch status {
+	case "draft", "approved", "archived":
+		return nil
+	default:
+		return fmt.Errorf("%w: status must be draft, approved, or archived", ErrValidation)
+	}
+}
+
+func ensureManualWordSetSource(source string) error {
+	switch source {
+	case "manual", "seed":
+		return nil
+	default:
+		return fmt.Errorf("%w: source must be manual or seed", ErrValidation)
+	}
+}
+
+func normalizeWordInputs(wordSetID string, inputs []WordSetWordInput) ([]db.CreateWordSetWordParams, error) {
+	words := make([]db.CreateWordSetWordParams, 0, len(inputs))
+	seenSortOrders := make(map[int]struct{}, len(inputs))
+	for index, input := range inputs {
+		word := strings.TrimSpace(input.Word)
+		if word == "" {
+			return nil, fmt.Errorf("%w: word %d cannot be blank", ErrValidation, index+1)
+		}
+		sortOrder := index + 1
+		if input.SortOrder != nil {
+			if *input.SortOrder <= 0 {
+				return nil, fmt.Errorf("%w: sortOrder must be positive", ErrValidation)
+			}
+			sortOrder = *input.SortOrder
+		}
+		if _, ok := seenSortOrders[sortOrder]; ok {
+			return nil, fmt.Errorf("%w: duplicate sortOrder %d in request", ErrConflict, sortOrder)
+		}
+		seenSortOrders[sortOrder] = struct{}{}
+		isActive := true
+		if input.IsActive != nil {
+			isActive = *input.IsActive
+		}
+		words = append(words, db.CreateWordSetWordParams{
+			WordSetID: wordSetID,
+			Word:      word,
+			SortOrder: sortOrder,
+			IsActive:  isActive,
+		})
+	}
+
+	return words, nil
 }
 
 func (s *Service) reconnectNotice(ctx context.Context, gameRunID string, player domain.Player, reconnected bool) (*domain.ReconnectNotice, error) {

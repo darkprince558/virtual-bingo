@@ -68,7 +68,8 @@ Production V1 is still built locally first, but local work should be shaped for 
 15. Done: add a 50-player load helper for realtime connections and gameplay bursts.
 16. Done: add Entra-ready auth seams before production login is wired.
 17. Done: add player reconnect/heartbeat state tracking with committed connection events for meaningful transitions.
-18. Next: smoke-test the full local backend flow, then wire the frontend to these backend contracts.
+18. Done: add local management API contracts for current identity, config/capabilities, game lookup/list/update, allowlist management, word-set CRUD, player `/me` aliases, claim detail, and host activity reads.
+19. Next: smoke-test the full local backend flow, then wire the frontend to these backend contracts.
 
 ## Frontend Milestone Order
 
@@ -91,11 +92,24 @@ Current backend endpoints:
 | `GET` | `/healthz` | Process health. |
 | `GET` | `/readyz` | Dependency readiness. |
 | `GET` | `/api/v1/version` | Service version and environment. |
+| `GET` | `/api/v1/config` | Public local capability/config discovery for the frontend. |
+| `GET` | `/api/v1/me` | Return/upsert the authenticated current user. |
 | `POST` | `/api/v1/games` | Create a production V1 game run. |
+| `GET` | `/api/v1/games` | List games by `host`, `player`, or admin-only `admin` scope with optional status filter. |
 | `GET` | `/api/v1/games/{gameID}` | Fetch game run state. |
+| `GET` | `/api/v1/games/code/{code}` | Fetch game run state by public code. |
+| `PATCH` | `/api/v1/games/{gameID}` | Update editable pre-live game metadata. |
 | `POST` | `/api/v1/games/{gameID}/allowed-players` | Add an allowed player. |
+| `POST` | `/api/v1/games/{gameID}/allowed-players/bulk` | Bulk add allowlist rows all-or-nothing. |
 | `GET` | `/api/v1/games/{gameID}/allowed-players` | List allowed players. |
+| `PATCH` | `/api/v1/games/{gameID}/allowed-players/{allowedPlayerID}` | Update an allowlist row. |
+| `DELETE` | `/api/v1/games/{gameID}/allowed-players/{allowedPlayerID}` | Delete an allowlist row inside the game. |
 | `POST` | `/api/v1/games/{gameID}/players` | Join or rejoin a player. |
+| `GET` | `/api/v1/games/{gameID}/players/me/snapshot` | Return current-player hydration/reconnect state by auth email. |
+| `POST` | `/api/v1/games/{gameID}/players/me/card` | Assign or return the current player's persisted card. |
+| `GET` | `/api/v1/games/{gameID}/players/me/card` | Fetch the current player's assigned card. |
+| `PATCH` | `/api/v1/games/{gameID}/players/me/card/cells/{cellID}` | Mark or unmark a current-player card cell. |
+| `POST` | `/api/v1/games/{gameID}/players/me/heartbeat` | Refresh current-player online state. |
 | `POST` | `/api/v1/games/{gameID}/players/{playerID}/card` | Assign or return a persisted card. |
 | `GET` | `/api/v1/games/{gameID}/players/{playerID}/card` | Fetch assigned card. |
 | `POST` | `/api/v1/games/{gameID}/start` | Start the game. |
@@ -108,13 +122,34 @@ Current backend endpoints:
 | `PATCH` | `/api/v1/games/{gameID}/players/{playerID}/card/cells/{cellID}` | Mark or unmark a player card cell. |
 | `POST` | `/api/v1/games/{gameID}/claims` | Submit and validate a Bingo claim. |
 | `GET` | `/api/v1/games/{gameID}/claims` | List host claim state. |
+| `GET` | `/api/v1/games/{gameID}/claims/{claimID}` | Read claim detail when host/admin or owning player. |
 | `GET` | `/api/v1/games/{gameID}/summary` | Return winners and final state. |
 | `GET` | `/api/v1/games/{gameID}/host-snapshot` | Return host hydration/reconnect state. |
 | `GET` | `/api/v1/games/{gameID}/players/{playerID}/snapshot` | Return player hydration/reconnect state. |
 | `POST` | `/api/v1/games/{gameID}/players/{playerID}/heartbeat` | Refresh player online state and `last_seen_at`. |
 | `GET` | `/api/v1/games/{gameID}/events` | Stream committed game events with SSE. |
+| `GET` | `/api/v1/games/{gameID}/activity` | Return committed host/admin activity feed events. |
+| `GET` | `/api/v1/word-sets` | List authenticated-readable word sets. |
+| `POST` | `/api/v1/word-sets` | Create a manual/seed word set. |
+| `GET` | `/api/v1/word-sets/{wordSetID}` | Read word set detail and words. |
+| `PATCH` | `/api/v1/word-sets/{wordSetID}` | Update word set metadata/status. |
+| `POST` | `/api/v1/word-sets/{wordSetID}/words` | Add a manual word. |
+| `PATCH` | `/api/v1/word-sets/{wordSetID}/words/{wordID}` | Update a manual word. |
+| `DELETE` | `/api/v1/word-sets/{wordSetID}/words/{wordID}` | Soft-deactivate a word. |
 
 Use `net/http` until route complexity proves a small router is worth adding.
+
+### Local Management API Status
+
+This backend slice deliberately stays local and backend-only. It does not add Azure, Microsoft Graph, rewards, automation jobs, AI content generation, voice, or frontend screens.
+
+Deliberate choices:
+
+- `GET /api/v1/config` is public because it only exposes local capability flags and reconnect timing.
+- Bulk allowlist insert is all-or-nothing. Duplicate emails, missing fields, or database conflicts reject the whole request.
+- Game code edits are allowed only before live gameplay states. The code is normalized to uppercase and still goes through the database uniqueness constraint.
+- Word deletion is soft deletion through `isActive=false`; gameplay card assignment still uses only active words and still requires at least 24 active words.
+- Activity feed reads from the committed game event outbox for now. Actor and entity-type data can be enriched later from audit rows if the host UI needs it.
 
 ## Realtime Backbone Status
 

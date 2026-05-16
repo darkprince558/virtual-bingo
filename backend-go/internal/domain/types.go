@@ -24,6 +24,11 @@ type WordSet struct {
 	UpdatedAt time.Time
 }
 
+type WordSetWithWords struct {
+	WordSet WordSet
+	Words   []WordSetWord
+}
+
 type WordSetWord struct {
 	ID        string
 	WordSetID string
@@ -48,6 +53,12 @@ type GameRun struct {
 	WinningPattern      *string
 	CreatedAt           time.Time
 	UpdatedAt           time.Time
+}
+
+type GameRunSummary struct {
+	GameRun            GameRun
+	AllowedPlayerCount int
+	PlayerCount        int
 }
 
 type AllowedPlayer struct {
@@ -149,6 +160,18 @@ type GameEvent struct {
 	Payload   json.RawMessage
 	Sequence  int64
 	CreatedAt time.Time
+}
+
+type ActivityEvent struct {
+	ID          string
+	GameRunID   string
+	Type        string
+	EntityType  *string
+	EntityID    *string
+	ActorUserID *string
+	Payload     json.RawMessage
+	Sequence    *int64
+	CreatedAt   time.Time
 }
 
 type HostSnapshot struct {

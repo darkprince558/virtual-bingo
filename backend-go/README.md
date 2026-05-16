@@ -24,30 +24,64 @@ The API listens on `http://localhost:8080` by default.
 - `GET /healthz`
 - `GET /readyz`
 - `GET /api/v1/version`
+- `GET /api/v1/config`
+- `GET /api/v1/me`
 - `POST /api/v1/games`
+- `GET /api/v1/games?status=&scope=host|player|admin`
 - `GET /api/v1/games/{gameID}`
+- `GET /api/v1/games/code/{code}`
+- `PATCH /api/v1/games/{gameID}`
 - `POST /api/v1/games/{gameID}/start`
 - `POST /api/v1/games/{gameID}/pause`
 - `POST /api/v1/games/{gameID}/resume`
 - `POST /api/v1/games/{gameID}/finish`
 - `POST /api/v1/games/{gameID}/cancel`
 - `GET /api/v1/games/{gameID}/host-snapshot`
+- `GET /api/v1/games/{gameID}/activity`
+- `GET /api/v1/games/{gameID}/players/me/snapshot`
+- `POST /api/v1/games/{gameID}/players/me/card`
+- `GET /api/v1/games/{gameID}/players/me/card`
+- `PATCH /api/v1/games/{gameID}/players/me/card/cells/{cellID}`
+- `POST /api/v1/games/{gameID}/players/me/heartbeat`
 - `GET /api/v1/games/{gameID}/players/{playerID}/snapshot`
 - `POST /api/v1/games/{gameID}/players/{playerID}/heartbeat`
 - `GET /api/v1/games/{gameID}/events`
 - `POST /api/v1/games/{gameID}/calls`
 - `GET /api/v1/games/{gameID}/calls`
 - `POST /api/v1/games/{gameID}/allowed-players`
+- `POST /api/v1/games/{gameID}/allowed-players/bulk`
 - `GET /api/v1/games/{gameID}/allowed-players`
+- `PATCH /api/v1/games/{gameID}/allowed-players/{allowedPlayerID}`
+- `DELETE /api/v1/games/{gameID}/allowed-players/{allowedPlayerID}`
 - `POST /api/v1/games/{gameID}/players`
 - `POST /api/v1/games/{gameID}/players/{playerID}/card`
 - `GET /api/v1/games/{gameID}/players/{playerID}/card`
 - `PATCH /api/v1/games/{gameID}/players/{playerID}/card/cells/{cellID}`
 - `POST /api/v1/games/{gameID}/claims`
 - `GET /api/v1/games/{gameID}/claims`
+- `GET /api/v1/games/{gameID}/claims/{claimID}`
 - `GET /api/v1/games/{gameID}/summary`
+- `GET /api/v1/word-sets`
+- `POST /api/v1/word-sets`
+- `GET /api/v1/word-sets/{wordSetID}`
+- `PATCH /api/v1/word-sets/{wordSetID}`
+- `POST /api/v1/word-sets/{wordSetID}/words`
+- `PATCH /api/v1/word-sets/{wordSetID}/words/{wordID}`
+- `DELETE /api/v1/word-sets/{wordSetID}/words/{wordID}`
 
 API responses are wrapped as `{ "data": ... }` for success and `{ "error": { "code": "...", "message": "..." } }` for errors. The API accepts `X-Request-ID` and returns it on each response.
+
+## Local Management API Notes
+
+- `GET /api/v1/config` is public so the frontend can discover local backend capabilities before auth. It reports the service/version, `appEnv`, `authMode`, local capability flags, and heartbeat/reconnect timing.
+- `GET /api/v1/me` is authenticated. It uses the same principal flow as other protected endpoints and upserts the current user before returning `id`, `externalSubject`, `email`, `displayName`, `role`, and `authMode`.
+- `GET /api/v1/games/code/{code}` looks up public game codes case-insensitively and returns the same game-run shape as `GET /api/v1/games/{gameID}`.
+- `GET /api/v1/games?scope=host|player|admin&status=` is authenticated. Host scope returns games hosted by the current host/admin user, player scope returns games where the current email is joined or allowlisted, and admin scope is admin-only.
+- `PATCH /api/v1/games/{gameID}` allows `name`, `code`, `wordSetId`, `scheduledStartAt`, and `winningPattern` while the game is still `draft`, `scheduled`, `invites_sent`, or `lobby_open`. Codes are normalized to uppercase and winning patterns use the existing bingo pattern normalization.
+- Bulk allowlist import accepts either a raw array of `{ "email", "displayName" }` rows or `{ "players": [...] }`. It is all-or-nothing: duplicate, blank, or conflicting rows fail the whole request without partial inserts.
+- Word sets are manual/seed only in this API slice. AI-generated content remains deferred. Deleting a word soft-deactivates it by setting `isActive=false`, so management reads can still show history while card assignment continues to require at least 24 active words.
+- Player `/me` aliases resolve the player by the authenticated principal email in the game and reuse the same snapshot/card/heartbeat/mark logic as the playerID endpoints.
+- `GET /api/v1/games/{gameID}/activity` reads committed game outbox events for host/admin activity feeds.
 
 ## Auth Modes
 
@@ -188,6 +222,17 @@ set -a; source .env; set +a
 go run ./cmd/api
 ```
 
+Read local capabilities and current identity:
+
+```bash
+curl -sS http://localhost:8080/api/v1/config
+
+curl -sS http://localhost:8080/api/v1/me \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Name: Local Demo Host' \
+  -H 'X-Dev-User-Role: host'
+```
+
 Create a game using the seeded word set:
 
 ```bash
@@ -209,6 +254,36 @@ curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/allowed-players \
   -d '{"email":"alex@example.local","displayName":"Alex Demo"}'
 ```
 
+Bulk add allowed players. This commits all rows or none:
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/allowed-players/bulk \
+  -H 'Content-Type: application/json' \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host' \
+  -d '[{"email":"alex@example.local","displayName":"Alex Demo"},{"email":"sam@example.local","displayName":"Sam Demo"}]'
+```
+
+List games by current-user scope, or look one up by code:
+
+```bash
+curl -sS 'http://localhost:8080/api/v1/games?scope=host&status=lobby_open' \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host'
+
+curl -sS http://localhost:8080/api/v1/games/code/LOCAL-API-GAME
+```
+
+Update editable game metadata before the game goes live:
+
+```bash
+curl -sS -X PATCH http://localhost:8080/api/v1/games/<game-id> \
+  -H 'Content-Type: application/json' \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host' \
+  -d '{"name":"Local API Game Updated","winningPattern":"four_corners"}'
+```
+
 Join the player:
 
 ```bash
@@ -222,6 +297,34 @@ Assign and fetch a card:
 ```bash
 curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/players/<player-id>/card
 curl -sS http://localhost:8080/api/v1/games/<game-id>/players/<player-id>/card
+```
+
+Player screens should prefer the authenticated `/me` aliases:
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/players/me/card \
+  -H 'X-Dev-User-Email: alex@example.local' \
+  -H 'X-Dev-User-Role: player'
+
+curl -sS http://localhost:8080/api/v1/games/<game-id>/players/me/snapshot \
+  -H 'X-Dev-User-Email: alex@example.local' \
+  -H 'X-Dev-User-Role: player'
+```
+
+Create and edit manual word sets:
+
+```bash
+curl -sS -X POST http://localhost:8080/api/v1/word-sets \
+  -H 'Content-Type: application/json' \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host' \
+  -d '{"name":"Manual Demo Words","status":"draft","source":"manual","words":[{"word":"Planning"},{"word":"Launch"}]}'
+
+curl -sS -X POST http://localhost:8080/api/v1/word-sets/<word-set-id>/words \
+  -H 'Content-Type: application/json' \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host' \
+  -d '{"word":"Retrospective"}'
 ```
 
 Start the game:
@@ -278,6 +381,10 @@ curl -sS http://localhost:8080/api/v1/games/<game-id>/claims \
   -H 'X-Dev-User-Role: host'
 
 curl -sS http://localhost:8080/api/v1/games/<game-id>/host-snapshot \
+  -H 'X-Dev-User-Email: host@example.local' \
+  -H 'X-Dev-User-Role: host'
+
+curl -sS http://localhost:8080/api/v1/games/<game-id>/activity \
   -H 'X-Dev-User-Email: host@example.local' \
   -H 'X-Dev-User-Role: host'
 

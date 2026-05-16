@@ -36,6 +36,14 @@ func TestAPIHealthAndVersionWithoutDatabase(t *testing.T) {
 		t.Fatalf("expected enveloped version response, got %s", versionResp.Body)
 	}
 
+	configResp := doRequest(t, handler, http.MethodGet, "/api/v1/config", nil)
+	if configResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected config 200, got %d: %s", configResp.StatusCode, configResp.Body)
+	}
+	if !strings.Contains(configResp.Body, `"sseEvents":true`) || !strings.Contains(configResp.Body, `"rewards":false`) {
+		t.Fatalf("expected local capability flags in config, got %s", configResp.Body)
+	}
+
 	readyResp := doRequest(t, handler, http.MethodGet, "/readyz", nil)
 	if readyResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected readyz 200, got %d: %s", readyResp.StatusCode, readyResp.Body)
@@ -82,6 +90,125 @@ func TestAPIAuthModeSelectionAndUnauthorizedEnvelope(t *testing.T) {
 	}
 	if !strings.Contains(unauthorizedResp.Body, `"error"`) || !strings.Contains(unauthorizedResp.Body, `"code":"unauthorized"`) {
 		t.Fatalf("expected unauthorized error envelope, got %s", unauthorizedResp.Body)
+	}
+}
+
+func TestAPIIdentityGameManagementAllowlistAndActivity(t *testing.T) {
+	ctx := context.Background()
+	databaseURL := createTestDatabase(t)
+	if err := db.RunMigrationsFromPath(databaseURL, "../db/migrations", db.MigrationUp); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	pool, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	defer pool.Close()
+
+	wordSetID := insertAPIWordSet(t, ctx, pool)
+	handler := NewServer(config.Config{AppEnv: "test", DatabaseURL: databaseURL, AuthMode: "dev"}, testLogger(), pool).Handler
+
+	meResp := doRequestWithDevAuth(t, handler, http.MethodGet, "/api/v1/me", nil, "manager@example.local", "Manager User", "host")
+	if meResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected /me 200, got %d: %s", meResp.StatusCode, meResp.Body)
+	}
+	me := currentUserFromData(t, meResp.Body)
+	if me.Email != "manager@example.local" || me.Role != "host" || me.AuthMode != "dev" {
+		t.Fatalf("unexpected current user response: %+v", me)
+	}
+
+	gameID := createAPIGameWithDevAuth(t, handler, "Management Game", "MANAGE-CODE", wordSetID, nil, "manager@example.local", "Manager User", "host")
+	codeResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/code/manage-code", nil)
+	if codeResp.StatusCode != http.StatusOK || stringFromData(t, codeResp.Body, "id") != gameID {
+		t.Fatalf("expected case-insensitive code lookup to return game %s, got %d: %s", gameID, codeResp.StatusCode, codeResp.Body)
+	}
+
+	hostListResp := doRequestWithDevAuth(t, handler, http.MethodGet, "/api/v1/games?scope=host", nil, "manager@example.local", "Manager User", "host")
+	if hostListResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected host list 200, got %d: %s", hostListResp.StatusCode, hostListResp.Body)
+	}
+	if summaries := gameRunSummariesFromData(t, hostListResp.Body); len(summaries) != 1 || summaries[0].ID != gameID {
+		t.Fatalf("expected one hosted game, got %+v", summaries)
+	}
+
+	bulkResp := doRequestWithDevAuth(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/allowed-players/bulk", []map[string]any{
+		{"email": "player-list@example.local", "displayName": "Player List"},
+		{"email": "second-list@example.local", "displayName": "Second List"},
+	}, "manager@example.local", "Manager User", "host")
+	if bulkResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected bulk allowlist 201, got %d: %s", bulkResp.StatusCode, bulkResp.Body)
+	}
+	allowed := allowedPlayersFromData(t, bulkResp.Body)
+	if len(allowed) != 2 || allowed[0].Email != "player-list@example.local" {
+		t.Fatalf("unexpected bulk allowlist response: %+v", allowed)
+	}
+
+	duplicateResp := doRequestWithDevAuth(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/allowed-players/bulk", []map[string]any{
+		{"email": "dupe@example.local", "displayName": "Dupe One"},
+		{"email": "DUPE@example.local", "displayName": "Dupe Two"},
+	}, "manager@example.local", "Manager User", "host")
+	if duplicateResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected duplicate bulk allowlist 409, got %d: %s", duplicateResp.StatusCode, duplicateResp.Body)
+	}
+
+	playerListResp := doRequestWithDevAuth(t, handler, http.MethodGet, "/api/v1/games?scope=player", nil, "player-list@example.local", "Player List", "player")
+	if playerListResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected player list 200, got %d: %s", playerListResp.StatusCode, playerListResp.Body)
+	}
+	if summaries := gameRunSummariesFromData(t, playerListResp.Body); len(summaries) != 1 || summaries[0].ID != gameID || summaries[0].AllowedPlayerCount != 2 {
+		t.Fatalf("expected player-scoped game with counts, got %+v", summaries)
+	}
+
+	patchResp := doRequestWithDevAuth(t, handler, http.MethodPatch, "/api/v1/games/"+gameID, map[string]any{
+		"name":           "Updated Management Game",
+		"winningPattern": "four_corners",
+	}, "manager@example.local", "Manager User", "host")
+	if patchResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected draft/lobby update 200, got %d: %s", patchResp.StatusCode, patchResp.Body)
+	}
+	if got := stringFromData(t, patchResp.Body, "name"); got != "Updated Management Game" {
+		t.Fatalf("expected updated name, got %s", got)
+	}
+	if got := stringFromData(t, patchResp.Body, "winningPattern"); got != "four_corners" {
+		t.Fatalf("expected normalized winning pattern, got %s", got)
+	}
+
+	forbiddenPatchResp := doRequestWithDevAuth(t, handler, http.MethodPatch, "/api/v1/games/"+gameID, map[string]any{"name": "Wrong Host"}, "wrong-host@example.local", "Wrong Host", "host")
+	if forbiddenPatchResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected wrong host patch 403, got %d: %s", forbiddenPatchResp.StatusCode, forbiddenPatchResp.Body)
+	}
+
+	deleteResp := doRequestWithDevAuth(t, handler, http.MethodDelete, "/api/v1/games/"+gameID+"/allowed-players/"+allowed[1].ID, nil, "manager@example.local", "Manager User", "host")
+	if deleteResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected delete allowed player 204, got %d: %s", deleteResp.StatusCode, deleteResp.Body)
+	}
+	wrongGameDeleteResp := doRequestWithDevAuth(t, handler, http.MethodDelete, "/api/v1/games/00000000-0000-0000-0000-000000000000/allowed-players/"+allowed[0].ID, nil, "manager@example.local", "Manager User", "host")
+	if wrongGameDeleteResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected wrong game delete 404, got %d: %s", wrongGameDeleteResp.StatusCode, wrongGameDeleteResp.Body)
+	}
+
+	if resp := doRequestWithDevAuth(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/start", nil, "manager@example.local", "Manager User", "host"); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected start 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+	livePatchResp := doRequestWithDevAuth(t, handler, http.MethodPatch, "/api/v1/games/"+gameID, map[string]any{"name": "Too Late"}, "manager@example.local", "Manager User", "host")
+	if livePatchResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected live game patch 409, got %d: %s", livePatchResp.StatusCode, livePatchResp.Body)
+	}
+
+	activityResp := doRequestWithDevAuth(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/activity", nil, "manager@example.local", "Manager User", "host")
+	if activityResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected activity 200, got %d: %s", activityResp.StatusCode, activityResp.Body)
+	}
+	if events := activityEventsFromData(t, activityResp.Body); len(events) == 0 {
+		t.Fatalf("expected committed activity events, got %+v", events)
+	}
+	adminListResp := doRequestWithDevAuth(t, handler, http.MethodGet, "/api/v1/games?scope=admin&status=live", nil, "admin@example.local", "Admin User", "admin")
+	if adminListResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected admin list 200, got %d: %s", adminListResp.StatusCode, adminListResp.Body)
+	}
+	if summaries := gameRunSummariesFromData(t, adminListResp.Body); len(summaries) != 1 || summaries[0].Status != "live" {
+		t.Fatalf("expected admin live list to include started game, got %+v", summaries)
 	}
 }
 
@@ -180,6 +307,94 @@ func TestAPIGameAllowlistJoinAndCardFlow(t *testing.T) {
 	}
 	if cells := cellsFromData(t, getCardResp.Body); len(cells) != 25 || !cells[12].IsFreeSpace {
 		t.Fatalf("expected persisted card cells with center free space, got %+v", cells)
+	}
+}
+
+func TestAPIWordSetManagement(t *testing.T) {
+	ctx := context.Background()
+	databaseURL := createTestDatabase(t)
+	if err := db.RunMigrationsFromPath(databaseURL, "../db/migrations", db.MigrationUp); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	pool, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	defer pool.Close()
+
+	handler := NewServer(config.Config{AppEnv: "test", DatabaseURL: databaseURL}, testLogger(), pool).Handler
+
+	createResp := doRequest(t, handler, http.MethodPost, "/api/v1/word-sets", map[string]any{
+		"name":   "Manual Word Set",
+		"status": "draft",
+		"source": "manual",
+		"words": []map[string]any{
+			{"word": "Discovery"},
+			{"word": "Planning"},
+		},
+	})
+	if createResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected create word set 201, got %d: %s", createResp.StatusCode, createResp.Body)
+	}
+	wordSet := wordSetFromData(t, createResp.Body)
+	if wordSet.Name != "Manual Word Set" || len(wordSet.Words) != 2 || !wordSet.Words[0].IsActive {
+		t.Fatalf("unexpected created word set: %+v", wordSet)
+	}
+
+	listResp := doRequest(t, handler, http.MethodGet, "/api/v1/word-sets", nil)
+	if listResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected list word sets 200, got %d: %s", listResp.StatusCode, listResp.Body)
+	}
+	if wordSets := wordSetsFromData(t, listResp.Body); len(wordSets) != 1 || wordSets[0].ID != wordSet.ID {
+		t.Fatalf("expected created word set in list, got %+v", wordSets)
+	}
+
+	patchResp := doRequest(t, handler, http.MethodPatch, "/api/v1/word-sets/"+wordSet.ID, map[string]any{
+		"name":   "Approved Manual Word Set",
+		"status": "approved",
+	})
+	if patchResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected update word set 200, got %d: %s", patchResp.StatusCode, patchResp.Body)
+	}
+	updated := wordSetFromData(t, patchResp.Body)
+	if updated.Name != "Approved Manual Word Set" || updated.Status != "approved" {
+		t.Fatalf("unexpected updated word set: %+v", updated)
+	}
+
+	createWordResp := doRequest(t, handler, http.MethodPost, "/api/v1/word-sets/"+wordSet.ID+"/words", map[string]any{
+		"word":      "Launch",
+		"sortOrder": 3,
+	})
+	if createWordResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected create word 201, got %d: %s", createWordResp.StatusCode, createWordResp.Body)
+	}
+	word := wordSetWordFromData(t, createWordResp.Body)
+	if word.Word != "Launch" || word.SortOrder != 3 {
+		t.Fatalf("unexpected created word: %+v", word)
+	}
+
+	patchWordResp := doRequest(t, handler, http.MethodPatch, "/api/v1/word-sets/"+wordSet.ID+"/words/"+word.ID, map[string]any{
+		"word": "Launch Plan",
+	})
+	if patchWordResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected update word 200, got %d: %s", patchWordResp.StatusCode, patchWordResp.Body)
+	}
+	if patchedWord := wordSetWordFromData(t, patchWordResp.Body); patchedWord.Word != "Launch Plan" {
+		t.Fatalf("expected patched word text, got %+v", patchedWord)
+	}
+
+	deleteWordResp := doRequest(t, handler, http.MethodDelete, "/api/v1/word-sets/"+wordSet.ID+"/words/"+word.ID, nil)
+	if deleteWordResp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected delete word 204, got %d: %s", deleteWordResp.StatusCode, deleteWordResp.Body)
+	}
+	detailResp := doRequest(t, handler, http.MethodGet, "/api/v1/word-sets/"+wordSet.ID, nil)
+	if detailResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected detail word set 200, got %d: %s", detailResp.StatusCode, detailResp.Body)
+	}
+	detail := wordSetFromData(t, detailResp.Body)
+	if len(detail.Words) != 3 || activeWordCount(detail.Words) != 2 {
+		t.Fatalf("expected soft-deleted inactive word in management detail, got %+v", detail.Words)
 	}
 }
 
@@ -286,6 +501,95 @@ func TestAPIPlayerReconnectHeartbeatAndAuthorization(t *testing.T) {
 
 	events := gameEventsFromDB(t, ctx, pool, gameID)
 	assertEventTypes(t, events, []string{"player.joined", "player.reconnected"})
+}
+
+func TestAPICurrentPlayerRoutesAndClaimDetailAuthorization(t *testing.T) {
+	ctx := context.Background()
+	databaseURL := createTestDatabase(t)
+	if err := db.RunMigrationsFromPath(databaseURL, "../db/migrations", db.MigrationUp); err != nil {
+		t.Fatalf("run migrations: %v", err)
+	}
+
+	pool, err := db.Open(ctx, databaseURL)
+	if err != nil {
+		t.Fatalf("open pool: %v", err)
+	}
+	defer pool.Close()
+
+	wordSetID := insertAPIWordSet(t, ctx, pool)
+	handler := NewServer(config.Config{AppEnv: "test", DatabaseURL: databaseURL}, testLogger(), pool).Handler
+	gameID := createAPIGame(t, handler, "Current Player Game", "CURRENT-PLAYER", wordSetID, nil)
+
+	if resp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/allowed-players", map[string]any{
+		"email":       "self@example.local",
+		"displayName": "Self Player",
+	}); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected allowed self player 201, got %d: %s", resp.StatusCode, resp.Body)
+	}
+	joinResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/players", map[string]any{
+		"email":       "self@example.local",
+		"displayName": "Self Player",
+	})
+	if joinResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected self player join 201, got %d: %s", joinResp.StatusCode, joinResp.Body)
+	}
+	playerID := stringFromData(t, joinResp.Body, "id")
+
+	selfCardResp := doRequestWithDevAuth(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/players/me/card", nil, "self@example.local", "Self Player", "player")
+	if selfCardResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected self card assign 201, got %d: %s", selfCardResp.StatusCode, selfCardResp.Body)
+	}
+	card := cardFromData(t, selfCardResp.Body)
+	if card.PlayerID != playerID || len(card.Cells) != 25 {
+		t.Fatalf("expected self card for current player, got %+v", card)
+	}
+	selfGetCardResp := doRequestWithDevAuth(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/players/me/card", nil, "self@example.local", "Self Player", "player")
+	if selfGetCardResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected self get card 200, got %d: %s", selfGetCardResp.StatusCode, selfGetCardResp.Body)
+	}
+
+	cell := firstNonFreeCell(t, card.Cells)
+	markResp := doRequestWithDevAuth(t, handler, http.MethodPatch, "/api/v1/games/"+gameID+"/players/me/card/cells/"+cell.ID, map[string]any{"marked": true}, "self@example.local", "Self Player", "player")
+	if markResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected self mark 200, got %d: %s", markResp.StatusCode, markResp.Body)
+	}
+	heartbeatResp := doRequestWithDevAuth(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/players/me/heartbeat", nil, "self@example.local", "Self Player", "player")
+	if heartbeatResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected self heartbeat 200, got %d: %s", heartbeatResp.StatusCode, heartbeatResp.Body)
+	}
+
+	if resp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/start", nil); resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected start 200, got %d: %s", resp.StatusCode, resp.Body)
+	}
+	claimResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/claims", map[string]any{
+		"playerId": playerID,
+		"pattern":  "single_line",
+	})
+	if claimResp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected claim 201, got %d: %s", claimResp.StatusCode, claimResp.Body)
+	}
+	claim := claimSubmissionFromData(t, claimResp.Body).Claim
+
+	selfSnapshotResp := doRequestWithDevAuth(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/players/me/snapshot", nil, "self@example.local", "Self Player", "player")
+	if selfSnapshotResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected self snapshot 200, got %d: %s", selfSnapshotResp.StatusCode, selfSnapshotResp.Body)
+	}
+	if snapshot := playerSnapshotFromData(t, selfSnapshotResp.Body); snapshot.Player.ID != playerID || snapshot.Card == nil || len(snapshot.Claims) != 1 {
+		t.Fatalf("unexpected self snapshot: %+v", snapshot)
+	}
+
+	ownClaimResp := doRequestWithDevAuth(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/claims/"+claim.ID, nil, "self@example.local", "Self Player", "player")
+	if ownClaimResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected own claim detail 200, got %d: %s", ownClaimResp.StatusCode, ownClaimResp.Body)
+	}
+	otherClaimResp := doRequestWithDevAuth(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/claims/"+claim.ID, nil, "other-claim@example.local", "Other Claim", "player")
+	if otherClaimResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected other player claim detail 403, got %d: %s", otherClaimResp.StatusCode, otherClaimResp.Body)
+	}
+	hostClaimResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/claims/"+claim.ID, nil)
+	if hostClaimResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected host claim detail 200, got %d: %s", hostClaimResp.StatusCode, hostClaimResp.Body)
+	}
 }
 
 func TestAPIPlayerTimeoutDisconnectAndReconnectNotice(t *testing.T) {
@@ -981,6 +1285,97 @@ func stringFromData(t *testing.T, body, key string) string {
 	return value
 }
 
+func currentUserFromData(t *testing.T, body string) apiCurrentUser {
+	t.Helper()
+
+	var envelope struct {
+		Data apiCurrentUser `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode current user response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func gameRunSummariesFromData(t *testing.T, body string) []apiGameRunSummary {
+	t.Helper()
+
+	var envelope struct {
+		Data []apiGameRunSummary `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode game summaries response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func allowedPlayersFromData(t *testing.T, body string) []apiAllowedPlayer {
+	t.Helper()
+
+	var envelope struct {
+		Data []apiAllowedPlayer `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode allowed players response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func wordSetFromData(t *testing.T, body string) apiWordSet {
+	t.Helper()
+
+	var envelope struct {
+		Data apiWordSet `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode word set response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func wordSetsFromData(t *testing.T, body string) []apiWordSet {
+	t.Helper()
+
+	var envelope struct {
+		Data []apiWordSet `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode word sets response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func wordSetWordFromData(t *testing.T, body string) apiWordSetWord {
+	t.Helper()
+
+	var envelope struct {
+		Data apiWordSetWord `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode word set word response: %v", err)
+	}
+
+	return envelope.Data
+}
+
+func activityEventsFromData(t *testing.T, body string) []apiActivityEvent {
+	t.Helper()
+
+	var envelope struct {
+		Data []apiActivityEvent `json:"data"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode activity events response: %v", err)
+	}
+
+	return envelope.Data
+}
+
 type apiCardCell struct {
 	ID          string     `json:"id"`
 	RowIndex    int        `json:"rowIndex"`
@@ -988,6 +1383,44 @@ type apiCardCell struct {
 	Word        string     `json:"word"`
 	IsFreeSpace bool       `json:"isFreeSpace"`
 	MarkedAt    *time.Time `json:"markedAt"`
+}
+
+type apiCurrentUser struct {
+	ID       string `json:"id"`
+	Email    string `json:"email"`
+	Role     string `json:"role"`
+	AuthMode string `json:"authMode"`
+}
+
+type apiGameRunSummary struct {
+	ID                 string `json:"id"`
+	Code               string `json:"code"`
+	Name               string `json:"name"`
+	Status             string `json:"status"`
+	AllowedPlayerCount int    `json:"allowedPlayerCount"`
+	PlayerCount        int    `json:"playerCount"`
+}
+
+type apiAllowedPlayer struct {
+	ID          string `json:"id"`
+	Email       string `json:"email"`
+	DisplayName string `json:"displayName"`
+}
+
+type apiWordSet struct {
+	ID     string           `json:"id"`
+	Name   string           `json:"name"`
+	Status string           `json:"status"`
+	Source string           `json:"source"`
+	Words  []apiWordSetWord `json:"words"`
+}
+
+type apiWordSetWord struct {
+	ID        string `json:"id"`
+	WordSetID string `json:"wordSetId"`
+	Word      string `json:"word"`
+	SortOrder int    `json:"sortOrder"`
+	IsActive  bool   `json:"isActive"`
 }
 
 type apiCard struct {
@@ -1070,6 +1503,12 @@ type apiGameEvent struct {
 	ID       string `json:"id"`
 	Type     string `json:"type"`
 	Sequence int64  `json:"sequence"`
+}
+
+type apiActivityEvent struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Sequence *int64 `json:"sequence"`
 }
 
 func cellsFromData(t *testing.T, body string) []apiCardCell {
@@ -1252,6 +1691,26 @@ func createAPIGame(t *testing.T, handler http.Handler, name, code, wordSetID str
 	return stringFromData(t, resp.Body, "id")
 }
 
+func createAPIGameWithDevAuth(t *testing.T, handler http.Handler, name, code, wordSetID string, winningPattern *string, email, displayName, role string) string {
+	t.Helper()
+
+	body := map[string]any{
+		"name":      name,
+		"code":      code,
+		"wordSetId": wordSetID,
+	}
+	if winningPattern != nil {
+		body["winningPattern"] = *winningPattern
+	}
+
+	resp := doRequestWithDevAuth(t, handler, http.MethodPost, "/api/v1/games", body, email, displayName, role)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected create game 201, got %d: %s", resp.StatusCode, resp.Body)
+	}
+
+	return stringFromData(t, resp.Body, "id")
+}
+
 func callAllWords(t *testing.T, handler http.Handler, gameID string) []apiCalledWord {
 	t.Helper()
 
@@ -1286,6 +1745,17 @@ func playerState(players []apiPlayer, playerID string) string {
 	}
 
 	return ""
+}
+
+func activeWordCount(words []apiWordSetWord) int {
+	count := 0
+	for _, word := range words {
+		if word.IsActive {
+			count++
+		}
+	}
+
+	return count
 }
 
 func firstNonFreeCell(t *testing.T, cells []apiCardCell) apiCardCell {

@@ -120,6 +120,164 @@ func (s *Store) GetGameRun(ctx context.Context, id string) (domain.GameRun, erro
 	return scanGameRun(row)
 }
 
+func (s *Store) GetGameRunByCode(ctx context.Context, code string) (domain.GameRun, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id::text, template_id::text, host_user_id::text, word_set_id::text, code, name, status, scheduled_start_at, started_at, ended_at, current_called_word_id::text, winning_pattern, created_at, updated_at
+		FROM game_runs
+		WHERE lower(code) = lower($1)
+	`, code)
+
+	return scanGameRun(row)
+}
+
+type ListGameRunsParams struct {
+	Scope       string
+	Status      string
+	UserID      string
+	PlayerEmail string
+}
+
+func (s *Store) ListGameRuns(ctx context.Context, params ListGameRunsParams) ([]domain.GameRunSummary, error) {
+	scope := strings.TrimSpace(params.Scope)
+	if scope == "" {
+		scope = "host"
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT
+		  g.id::text,
+		  g.template_id::text,
+		  g.host_user_id::text,
+		  g.word_set_id::text,
+		  g.code,
+		  g.name,
+		  g.status,
+		  g.scheduled_start_at,
+		  g.started_at,
+		  g.ended_at,
+		  g.current_called_word_id::text,
+		  g.winning_pattern,
+		  g.created_at,
+		  g.updated_at,
+		  count(DISTINCT ap.id)::int AS allowed_player_count,
+		  count(DISTINCT p.id)::int AS player_count
+		FROM game_runs AS g
+		LEFT JOIN allowed_players AS ap ON ap.game_run_id = g.id
+		LEFT JOIN players AS p ON p.game_run_id = g.id
+		WHERE ($1 = '' OR g.status = $1)
+		  AND (
+		    $2 = 'admin'
+		    OR ($2 = 'host' AND g.host_user_id = $3)
+		    OR (
+		      $2 = 'player'
+		      AND (
+		        EXISTS (
+		          SELECT 1
+		          FROM players AS player_scope
+		          WHERE player_scope.game_run_id = g.id
+		            AND lower(player_scope.email) = lower($4)
+		        )
+		        OR EXISTS (
+		          SELECT 1
+		          FROM allowed_players AS allowed_scope
+		          WHERE allowed_scope.game_run_id = g.id
+		            AND lower(allowed_scope.email) = lower($4)
+		        )
+		      )
+		    )
+		  )
+		GROUP BY g.id
+		ORDER BY g.scheduled_start_at NULLS LAST, g.created_at DESC, g.id
+	`, strings.TrimSpace(params.Status), scope, params.UserID, params.PlayerEmail)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	summaries := make([]domain.GameRunSummary, 0)
+	for rows.Next() {
+		var summary domain.GameRunSummary
+		run, err := scanGameRunWithCounts(rows, &summary.AllowedPlayerCount, &summary.PlayerCount)
+		if err != nil {
+			return nil, err
+		}
+		summary.GameRun = run
+		summaries = append(summaries, summary)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return summaries, nil
+}
+
+type UpdateGameRunParams struct {
+	GameRunID        string
+	Name             *string
+	Code             *string
+	WordSetID        *string
+	ScheduledStartAt *time.Time
+	WinningPattern   *string
+	ActorUserID      *string
+}
+
+func (s *Store) UpdateGameRun(ctx context.Context, params UpdateGameRunParams) (domain.GameRun, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.GameRun{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	run, err := getGameRunForUpdate(ctx, tx, params.GameRunID)
+	if err != nil {
+		return domain.GameRun{}, mapWriteError(err)
+	}
+	if !statusAllowed(run.Status, []string{"draft", "scheduled", "invites_sent", "lobby_open"}) {
+		return domain.GameRun{}, ErrConflict
+	}
+
+	row := tx.QueryRow(ctx, `
+		UPDATE game_runs
+		SET name = COALESCE($2, name),
+		    code = COALESCE($3, code),
+		    word_set_id = COALESCE($4, word_set_id),
+		    scheduled_start_at = COALESCE($5, scheduled_start_at),
+		    winning_pattern = COALESCE($6, winning_pattern),
+		    updated_at = now()
+		WHERE id = $1
+		RETURNING id::text, template_id::text, host_user_id::text, word_set_id::text, code, name, status, scheduled_start_at, started_at, ended_at, current_called_word_id::text, winning_pattern, created_at, updated_at
+	`, params.GameRunID, params.Name, params.Code, params.WordSetID, params.ScheduledStartAt, params.WinningPattern)
+	updated, err := scanGameRun(row)
+	if err != nil {
+		return domain.GameRun{}, mapWriteError(err)
+	}
+
+	if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "game.updated", &updated.ID, map[string]any{
+		"name":           updated.Name,
+		"code":           updated.Code,
+		"wordSetId":      updated.WordSetID,
+		"winningPattern": updated.WinningPattern,
+	}); err != nil {
+		return domain.GameRun{}, err
+	}
+	if err := recordAuditEventInTx(ctx, tx, audit.Event{
+		GameRunID:   &params.GameRunID,
+		ActorUserID: params.ActorUserID,
+		EventType:   "game.updated",
+		EntityType:  "game_run",
+		EntityID:    &updated.ID,
+		Payload:     map[string]any{"code": updated.Code, "name": updated.Name},
+	}); err != nil {
+		return domain.GameRun{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.GameRun{}, mapWriteError(err)
+	}
+
+	return updated, nil
+}
+
 func (s *Store) UpdateGameRunStatus(ctx context.Context, gameRunID, status string, startedAt *time.Time, endedAt *time.Time) (domain.GameRun, error) {
 	row := s.pool.QueryRow(ctx, `
 		UPDATE game_runs
@@ -235,7 +393,17 @@ func (s *Store) AddAllowedPlayer(ctx context.Context, params AddAllowedPlayerPar
 		source = "manual"
 	}
 
-	row := s.pool.QueryRow(ctx, `
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.AllowedPlayer{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := getGameRunForUpdate(ctx, tx, params.GameRunID); err != nil {
+		return domain.AllowedPlayer{}, mapWriteError(err)
+	}
+
+	row := tx.QueryRow(ctx, `
 		INSERT INTO allowed_players (game_run_id, email, display_name, source)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id::text, game_run_id::text, email, display_name, source, created_at
@@ -243,6 +411,130 @@ func (s *Store) AddAllowedPlayer(ctx context.Context, params AddAllowedPlayerPar
 
 	player, err := scanAllowedPlayer(row)
 	if err != nil {
+		return domain.AllowedPlayer{}, mapWriteError(err)
+	}
+
+	if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "allowed_player.added", &player.ID, map[string]any{"email": player.Email, "displayName": player.DisplayName}); err != nil {
+		return domain.AllowedPlayer{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.AllowedPlayer{}, mapWriteError(err)
+	}
+
+	return player, nil
+}
+
+type BulkAddAllowedPlayersParams struct {
+	GameRunID string
+	Players   []AddAllowedPlayerParams
+}
+
+func (s *Store) BulkAddAllowedPlayers(ctx context.Context, params BulkAddAllowedPlayersParams) ([]domain.AllowedPlayer, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return nil, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := getGameRunForUpdate(ctx, tx, params.GameRunID); err != nil {
+		return nil, mapWriteError(err)
+	}
+
+	players := make([]domain.AllowedPlayer, 0, len(params.Players))
+	for _, input := range params.Players {
+		source := input.Source
+		if source == "" {
+			source = "manual"
+		}
+		row := tx.QueryRow(ctx, `
+			INSERT INTO allowed_players (game_run_id, email, display_name, source)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id::text, game_run_id::text, email, display_name, source, created_at
+		`, params.GameRunID, input.Email, input.DisplayName, source)
+		player, err := scanAllowedPlayer(row)
+		if err != nil {
+			return nil, mapWriteError(err)
+		}
+		if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "allowed_player.added", &player.ID, map[string]any{"email": player.Email, "displayName": player.DisplayName}); err != nil {
+			return nil, err
+		}
+		players = append(players, player)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, mapWriteError(err)
+	}
+
+	return players, nil
+}
+
+type UpdateAllowedPlayerParams struct {
+	GameRunID       string
+	AllowedPlayerID string
+	Email           *string
+	DisplayName     *string
+}
+
+func (s *Store) UpdateAllowedPlayer(ctx context.Context, params UpdateAllowedPlayerParams) (domain.AllowedPlayer, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.AllowedPlayer{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := getGameRunForUpdate(ctx, tx, params.GameRunID); err != nil {
+		return domain.AllowedPlayer{}, mapWriteError(err)
+	}
+
+	row := tx.QueryRow(ctx, `
+		UPDATE allowed_players
+		SET email = COALESCE($3, email),
+		    display_name = COALESCE($4, display_name)
+		WHERE game_run_id = $1
+		  AND id = $2
+		RETURNING id::text, game_run_id::text, email, display_name, source, created_at
+	`, params.GameRunID, params.AllowedPlayerID, params.Email, params.DisplayName)
+	player, err := scanAllowedPlayer(row)
+	if err != nil {
+		return domain.AllowedPlayer{}, mapWriteError(err)
+	}
+
+	if _, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "allowed_player.updated", &player.ID, map[string]any{"email": player.Email, "displayName": player.DisplayName}); err != nil {
+		return domain.AllowedPlayer{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.AllowedPlayer{}, mapWriteError(err)
+	}
+
+	return player, nil
+}
+
+func (s *Store) DeleteAllowedPlayer(ctx context.Context, gameRunID, allowedPlayerID string) (domain.AllowedPlayer, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.AllowedPlayer{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := getGameRunForUpdate(ctx, tx, gameRunID); err != nil {
+		return domain.AllowedPlayer{}, mapWriteError(err)
+	}
+
+	row := tx.QueryRow(ctx, `
+		DELETE FROM allowed_players
+		WHERE game_run_id = $1
+		  AND id = $2
+		RETURNING id::text, game_run_id::text, email, display_name, source, created_at
+	`, gameRunID, allowedPlayerID)
+	player, err := scanAllowedPlayer(row)
+	if err != nil {
+		return domain.AllowedPlayer{}, mapWriteError(err)
+	}
+
+	if _, err := insertOutboxEventInTx(ctx, tx, gameRunID, "allowed_player.deleted", &player.ID, map[string]any{"email": player.Email}); err != nil {
+		return domain.AllowedPlayer{}, err
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return domain.AllowedPlayer{}, mapWriteError(err)
 	}
 
@@ -538,6 +830,246 @@ func (s *Store) ListWordSetWords(ctx context.Context, wordSetID string) ([]domai
 	}
 
 	return words, nil
+}
+
+func (s *Store) ListWordSets(ctx context.Context, approvedOnly bool) ([]domain.WordSet, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, name, status, source, created_at, updated_at
+		FROM word_sets
+		WHERE ($1 = false OR status = 'approved')
+		ORDER BY name ASC, created_at DESC
+	`, approvedOnly)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	wordSets := make([]domain.WordSet, 0)
+	for rows.Next() {
+		wordSet, err := scanWordSet(rows)
+		if err != nil {
+			return nil, err
+		}
+		wordSets = append(wordSets, wordSet)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return wordSets, nil
+}
+
+func (s *Store) GetWordSet(ctx context.Context, wordSetID string) (domain.WordSet, error) {
+	row := s.pool.QueryRow(ctx, `
+		SELECT id::text, name, status, source, created_at, updated_at
+		FROM word_sets
+		WHERE id = $1
+	`, wordSetID)
+
+	return scanWordSet(row)
+}
+
+func (s *Store) ListWordSetWordsForManagement(ctx context.Context, wordSetID string) ([]domain.WordSetWord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, word_set_id::text, word, sort_order, is_active, created_at
+		FROM word_set_words
+		WHERE word_set_id = $1
+		ORDER BY sort_order ASC, created_at ASC, id ASC
+	`, wordSetID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	words := make([]domain.WordSetWord, 0)
+	for rows.Next() {
+		word, err := scanWordSetWord(rows)
+		if err != nil {
+			return nil, err
+		}
+		words = append(words, word)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return words, nil
+}
+
+type CreateWordSetParams struct {
+	Name            string
+	Status          string
+	Source          string
+	CreatedByUserID *string
+	Words           []CreateWordSetWordParams
+}
+
+func (s *Store) CreateWordSet(ctx context.Context, params CreateWordSetParams) (domain.WordSetWithWords, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.WordSetWithWords{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	row := tx.QueryRow(ctx, `
+		INSERT INTO word_sets (name, status, source, created_by_user_id, approved_by_user_id, approved_at)
+		VALUES (
+		  $1,
+		  $2,
+		  $3,
+		  $4,
+		  CASE WHEN $2 = 'approved' THEN $4::uuid ELSE NULL END,
+		  CASE WHEN $2 = 'approved' THEN now() ELSE NULL END
+		)
+		RETURNING id::text, name, status, source, created_at, updated_at
+	`, params.Name, params.Status, params.Source, params.CreatedByUserID)
+	wordSet, err := scanWordSet(row)
+	if err != nil {
+		return domain.WordSetWithWords{}, mapWriteError(err)
+	}
+
+	words := make([]domain.WordSetWord, 0, len(params.Words))
+	for index, input := range params.Words {
+		sortOrder := input.SortOrder
+		if sortOrder <= 0 {
+			sortOrder = index + 1
+		}
+		wordRow := tx.QueryRow(ctx, `
+			INSERT INTO word_set_words (word_set_id, word, sort_order, is_active)
+			VALUES ($1, $2, $3, $4)
+			RETURNING id::text, word_set_id::text, word, sort_order, is_active, created_at
+		`, wordSet.ID, input.Word, sortOrder, input.IsActive)
+		word, err := scanWordSetWord(wordRow)
+		if err != nil {
+			return domain.WordSetWithWords{}, mapWriteError(err)
+		}
+		words = append(words, word)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.WordSetWithWords{}, mapWriteError(err)
+	}
+
+	return domain.WordSetWithWords{WordSet: wordSet, Words: words}, nil
+}
+
+type UpdateWordSetParams struct {
+	WordSetID string
+	Name      *string
+	Status    *string
+	Source    *string
+}
+
+func (s *Store) UpdateWordSet(ctx context.Context, params UpdateWordSetParams) (domain.WordSet, error) {
+	row := s.pool.QueryRow(ctx, `
+		UPDATE word_sets
+		SET name = COALESCE($2, name),
+		    status = COALESCE($3, status),
+		    source = COALESCE($4, source),
+		    approved_at = CASE WHEN COALESCE($3, status) = 'approved' AND approved_at IS NULL THEN now() ELSE approved_at END,
+		    updated_at = now()
+		WHERE id = $1
+		RETURNING id::text, name, status, source, created_at, updated_at
+	`, params.WordSetID, params.Name, params.Status, params.Source)
+
+	return scanWordSet(row)
+}
+
+type CreateWordSetWordParams struct {
+	WordSetID string
+	Word      string
+	SortOrder int
+	IsActive  bool
+}
+
+func (s *Store) CreateWordSetWord(ctx context.Context, params CreateWordSetWordParams) (domain.WordSetWord, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.WordSetWord{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := getWordSetForUpdate(ctx, tx, params.WordSetID); err != nil {
+		return domain.WordSetWord{}, mapWriteError(err)
+	}
+
+	sortOrder := params.SortOrder
+	if sortOrder <= 0 {
+		if err := tx.QueryRow(ctx, `SELECT COALESCE(MAX(sort_order), 0) + 1 FROM word_set_words WHERE word_set_id = $1`, params.WordSetID).Scan(&sortOrder); err != nil {
+			return domain.WordSetWord{}, mapWriteError(err)
+		}
+	}
+
+	row := tx.QueryRow(ctx, `
+		INSERT INTO word_set_words (word_set_id, word, sort_order, is_active)
+		VALUES ($1, $2, $3, $4)
+		RETURNING id::text, word_set_id::text, word, sort_order, is_active, created_at
+	`, params.WordSetID, params.Word, sortOrder, params.IsActive)
+	word, err := scanWordSetWord(row)
+	if err != nil {
+		return domain.WordSetWord{}, mapWriteError(err)
+	}
+
+	if _, err := tx.Exec(ctx, `UPDATE word_sets SET updated_at = now() WHERE id = $1`, params.WordSetID); err != nil {
+		return domain.WordSetWord{}, mapWriteError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.WordSetWord{}, mapWriteError(err)
+	}
+
+	return word, nil
+}
+
+type UpdateWordSetWordParams struct {
+	WordSetID string
+	WordID    string
+	Word      *string
+	SortOrder *int
+	IsActive  *bool
+}
+
+func (s *Store) UpdateWordSetWord(ctx context.Context, params UpdateWordSetWordParams) (domain.WordSetWord, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.WordSetWord{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := getWordSetForUpdate(ctx, tx, params.WordSetID); err != nil {
+		return domain.WordSetWord{}, mapWriteError(err)
+	}
+
+	row := tx.QueryRow(ctx, `
+		UPDATE word_set_words
+		SET word = COALESCE($3, word),
+		    sort_order = COALESCE($4, sort_order),
+		    is_active = COALESCE($5, is_active)
+		WHERE word_set_id = $1
+		  AND id = $2
+		RETURNING id::text, word_set_id::text, word, sort_order, is_active, created_at
+	`, params.WordSetID, params.WordID, params.Word, params.SortOrder, params.IsActive)
+	word, err := scanWordSetWord(row)
+	if err != nil {
+		return domain.WordSetWord{}, mapWriteError(err)
+	}
+
+	if _, err := tx.Exec(ctx, `UPDATE word_sets SET updated_at = now() WHERE id = $1`, params.WordSetID); err != nil {
+		return domain.WordSetWord{}, mapWriteError(err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return domain.WordSetWord{}, mapWriteError(err)
+	}
+
+	return word, nil
+}
+
+func (s *Store) DeleteWordSetWord(ctx context.Context, wordSetID, wordID string) (domain.WordSetWord, error) {
+	inactive := false
+	return s.UpdateWordSetWord(ctx, UpdateWordSetWordParams{
+		WordSetID: wordSetID,
+		WordID:    wordID,
+		IsActive:  &inactive,
+	})
 }
 
 type CreateCalledWordParams struct {
@@ -1217,6 +1749,59 @@ func (s *Store) ListGameEvents(ctx context.Context, gameRunID string, afterSeque
 	return gameEvents, nil
 }
 
+func (s *Store) ListActivityEvents(ctx context.Context, gameRunID string, limit int) ([]domain.ActivityEvent, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT id::text, game_run_id::text, type, entity_id::text, payload, sequence, created_at
+		FROM game_event_outbox
+		WHERE game_run_id = $1
+		ORDER BY sequence DESC
+		LIMIT $2
+	`, gameRunID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	events := make([]domain.ActivityEvent, 0)
+	for rows.Next() {
+		var event domain.GameEvent
+		var entityID sql.NullString
+		var payload []byte
+		if err := rows.Scan(
+			&event.ID,
+			&event.GameRunID,
+			&event.Type,
+			&entityID,
+			&payload,
+			&event.Sequence,
+			&event.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		event.EntityID = nullableStringPtr(entityID)
+		event.Payload = json.RawMessage(payload)
+		sequence := event.Sequence
+		events = append(events, domain.ActivityEvent{
+			ID:        event.ID,
+			GameRunID: event.GameRunID,
+			Type:      event.Type,
+			EntityID:  event.EntityID,
+			Payload:   event.Payload,
+			Sequence:  &sequence,
+			CreatedAt: event.CreatedAt,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return events, nil
+}
+
 type scanner interface {
 	Scan(dest ...any) error
 }
@@ -1246,6 +1831,17 @@ func getPlayerForUpdate(ctx context.Context, q queryer, playerID string) (domain
 	`, playerID)
 
 	return scanPlayer(row)
+}
+
+func getWordSetForUpdate(ctx context.Context, q queryer, wordSetID string) (domain.WordSet, error) {
+	row := q.QueryRow(ctx, `
+		SELECT id::text, name, status, source, created_at, updated_at
+		FROM word_sets
+		WHERE id = $1
+		FOR UPDATE
+	`, wordSetID)
+
+	return scanWordSet(row)
 }
 
 func getPlayerCardInTx(ctx context.Context, q queryer, playerID string) (domain.BingoCard, error) {
@@ -1454,6 +2050,44 @@ func scanGameRun(row scanner) (domain.GameRun, error) {
 	return run, nil
 }
 
+func scanGameRunWithCounts(row scanner, allowedPlayerCount *int, playerCount *int) (domain.GameRun, error) {
+	var run domain.GameRun
+	var templateID, wordSetID, currentCalledWordID, winningPattern sql.NullString
+	var scheduledStartAt, startedAt, endedAt sql.NullTime
+
+	err := row.Scan(
+		&run.ID,
+		&templateID,
+		&run.HostUserID,
+		&wordSetID,
+		&run.Code,
+		&run.Name,
+		&run.Status,
+		&scheduledStartAt,
+		&startedAt,
+		&endedAt,
+		&currentCalledWordID,
+		&winningPattern,
+		&run.CreatedAt,
+		&run.UpdatedAt,
+		allowedPlayerCount,
+		playerCount,
+	)
+	if err != nil {
+		return domain.GameRun{}, mapError(err)
+	}
+
+	run.TemplateID = nullableStringPtr(templateID)
+	run.WordSetID = nullableStringPtr(wordSetID)
+	run.ScheduledStartAt = nullableTimePtr(scheduledStartAt)
+	run.StartedAt = nullableTimePtr(startedAt)
+	run.EndedAt = nullableTimePtr(endedAt)
+	run.CurrentCalledWordID = nullableStringPtr(currentCalledWordID)
+	run.WinningPattern = nullableStringPtr(winningPattern)
+
+	return run, nil
+}
+
 func scanUser(row scanner) (domain.User, error) {
 	var user domain.User
 	var externalSubject sql.NullString
@@ -1465,6 +2099,16 @@ func scanUser(row scanner) (domain.User, error) {
 
 	user.ExternalSubject = nullableStringPtr(externalSubject)
 	return user, nil
+}
+
+func scanWordSet(row scanner) (domain.WordSet, error) {
+	var wordSet domain.WordSet
+	err := row.Scan(&wordSet.ID, &wordSet.Name, &wordSet.Status, &wordSet.Source, &wordSet.CreatedAt, &wordSet.UpdatedAt)
+	if err != nil {
+		return domain.WordSet{}, mapError(err)
+	}
+
+	return wordSet, nil
 }
 
 func scanWordSetWord(row scanner) (domain.WordSetWord, error) {
