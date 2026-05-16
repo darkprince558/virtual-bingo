@@ -20,6 +20,9 @@ type Config struct {
 	AppEnv                         string
 	DatabaseURL                    string
 	CORSAllowedOrigins             []string
+	AIServiceBaseURL               string
+	AIServiceTimeout               time.Duration
+	AIServiceEnabled               bool
 	AuthMode                       string
 	PlayerConnectionTimeout        time.Duration
 	PlayerConnectionSweepInterval  time.Duration
@@ -41,6 +44,9 @@ func Load() (Config, error) {
 		AppEnv:                         getEnv("APP_ENV", defaultAppEnv),
 		DatabaseURL:                    strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		CORSAllowedOrigins:             splitCSV(os.Getenv("CORS_ALLOWED_ORIGINS")),
+		AIServiceBaseURL:               strings.TrimRight(strings.TrimSpace(os.Getenv("AI_SERVICE_BASE_URL")), "/"),
+		AIServiceTimeout:               10 * time.Second,
+		AIServiceEnabled:               parseBoolEnv("AI_SERVICE_ENABLED", false),
 		AuthMode:                       normalizeAuthMode(getEnv("AUTH_MODE", "dev")),
 		PlayerConnectionTimeout:        90 * time.Second,
 		PlayerConnectionSweepInterval:  30 * time.Second,
@@ -90,6 +96,17 @@ func Load() (Config, error) {
 	}
 	if cfg.PlayerConnectionSweepBatchSize < 1 {
 		return Config{}, errors.New("PLAYER_CONNECTION_SWEEP_BATCH_SIZE must be at least 1")
+	}
+	if timeout, err := parseSecondsEnv("AI_SERVICE_TIMEOUT_SECONDS", cfg.AIServiceTimeout); err != nil {
+		return Config{}, err
+	} else {
+		cfg.AIServiceTimeout = timeout
+	}
+	if cfg.AIServiceTimeout <= 0 {
+		return Config{}, errors.New("AI_SERVICE_TIMEOUT_SECONDS must be positive")
+	}
+	if cfg.AIServiceEnabled && cfg.AIServiceBaseURL == "" {
+		return Config{}, errors.New("AI_SERVICE_BASE_URL is required when AI_SERVICE_ENABLED=true")
 	}
 
 	return cfg, nil
@@ -172,4 +189,20 @@ func parseIntEnv(key string, fallback int) (int, error) {
 	}
 
 	return parsed, nil
+}
+
+func parseBoolEnv(key string, fallback bool) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if value == "" {
+		return fallback
+	}
+
+	switch value {
+	case "1", "true", "yes", "y", "on", "enabled":
+		return true
+	case "0", "false", "no", "n", "off", "disabled":
+		return false
+	default:
+		return fallback
+	}
 }

@@ -69,7 +69,10 @@ Production V1 is still built locally first, but local work should be shaped for 
 16. Done: add Entra-ready auth seams before production login is wired.
 17. Done: add player reconnect/heartbeat state tracking with committed connection events for meaningful transitions.
 18. Done: add local management API contracts for current identity, config/capabilities, game lookup/list/update, allowlist management, word-set CRUD, player `/me` aliases, claim detail, and host activity reads.
-19. Next: smoke-test the full local backend flow, then wire the frontend to these backend contracts.
+19. Done: add backend feature discovery flags, durable game-run settings, player marking preferences, auto-mark mode, auto-mark backfill, and player claim-readiness.
+20. Done: add the first Go automation/content foundation for T-60 prep and T-30 lock: Python AI client boundary, local disabled AI mode, generated content tables, host review APIs, lock APIs, audit/outbox events, and locked generated word sets for existing card assignment.
+21. Done: add the second Go AI/autonomous-game batch: deterministic locked call deck storage, deck-based word calling, caller asset metadata storage with Python bulk/single client methods and local fallback lines, mock invite delivery attempts with game-code links, T-10 lobby open hook, player icon/avatar profile storage, and structured theme generation/approval/application.
+22. Next: wire the frontend to the now-persisted backend flows, then add real Microsoft Graph/Teams/email delivery, Azure Speech storage/execution, and deployment workers in later batches.
 
 ## Frontend Milestone Order
 
@@ -117,6 +120,16 @@ Current backend endpoints:
 | `POST` | `/api/v1/games/{gameID}/resume` | Resume the game. |
 | `POST` | `/api/v1/games/{gameID}/finish` | Finish the game. |
 | `POST` | `/api/v1/games/{gameID}/cancel` | Cancel the game. |
+| `GET` | `/api/v1/games/{gameID}/settings` | Host/admin read of lazily created durable game settings. |
+| `PATCH` | `/api/v1/games/{gameID}/settings` | Host/admin patch of marking, claim-readiness, voice placeholder, caller placeholder, and theme placeholder settings. |
+| `POST` | `/api/v1/games/{gameID}/content/prepare` | Host/admin manual hook for the T-60 generated content prep job. |
+| `GET` | `/api/v1/games/{gameID}/content` | Host/admin read of generated topic, summary, words, review window, lock state, and provider metadata. |
+| `PATCH` | `/api/v1/games/{gameID}/content` | Host/admin pre-lock edits to generated topic, summary, words, and caller style placeholder. |
+| `POST` | `/api/v1/games/{gameID}/content/lock` | Host/admin manual hook for the T-30 content lock job; creates/attaches an approved generated word set. |
+| `GET` | `/api/v1/games/{gameID}/players/me/preferences` | Current-player read of optional marking preferences. |
+| `PATCH` | `/api/v1/games/{gameID}/players/me/preferences` | Current-player patch of optional marking mode when host allows player choice. |
+| `POST` | `/api/v1/games/{gameID}/auto-mark/run` | Host/admin idempotent backfill for already-called words and effective `auto_mark` players. |
+| `GET` | `/api/v1/games/{gameID}/players/me/claim-readiness` | Current-player UX helper for supported claim readiness from persisted card/call state. |
 | `POST` | `/api/v1/games/{gameID}/calls` | Record the next called word. |
 | `GET` | `/api/v1/games/{gameID}/calls` | List called words. |
 | `PATCH` | `/api/v1/games/{gameID}/players/{playerID}/card/cells/{cellID}` | Mark or unmark a player card cell. |
@@ -141,15 +154,40 @@ Use `net/http` until route complexity proves a small router is worth adding.
 
 ### Local Management API Status
 
-This backend slice deliberately stays local and backend-only. It does not add Azure, Microsoft Graph, rewards, automation jobs, AI content generation, voice, or frontend screens.
+This backend slice deliberately stays local and backend-only. It does not add Azure, Microsoft Graph, rewards, real automation jobs, voice-claim recordings, lobby chat, or frontend screens.
 
 Deliberate choices:
 
-- `GET /api/v1/config` is public because it only exposes local capability flags and reconnect timing.
+- `GET /api/v1/config` is public because it only exposes local capability flags and reconnect timing. It now reports `gameSettings=true`, `autoMark=true`, `aiContent=true`, `aiCaller=true`, `themeGenerator=true`, and `automation=true`, while voice claims, Teams app, and rewards stay false.
 - Bulk allowlist insert is all-or-nothing. Duplicate emails, missing fields, or database conflicts reject the whole request.
 - Game code edits are allowed only before live gameplay states. The code is normalized to uppercase and still goes through the database uniqueness constraint.
 - Word deletion is soft deletion through `isActive=false`; gameplay card assignment still uses only active words and still requires at least 24 active words.
 - Activity feed reads from the committed game event outbox for now. Actor and entity-type data can be enriched later from audit rows if the host UI needs it.
+- Game settings live in `game_run_settings` with defaults created lazily. Player marking preferences live in `player_preferences`; game settings win unless `allow_player_marking_mode_choice=true`.
+- Auto-mark is real backend behavior now. `manual` preserves manual marking, `assist` does not mark automatically, and `auto_mark` marks matching unmarked cells transactionally with called-word commits or through the idempotent backfill endpoint.
+- Voice claim settings are stored as explicit placeholders only. Generated content prep/review/lock, caller asset metadata, structured theme persistence, mock invite delivery, and manual automation hooks are implemented, but no microphone upload, Azure Speech execution, real Teams/email behavior, rewards, cloud deployment, or frontend wiring has been added.
+
+### AI Content Prep/Review/Lock Status
+
+The first Go-side content automation slice is implemented.
+
+- `AI_SERVICE_ENABLED`, `AI_SERVICE_BASE_URL`, and `AI_SERVICE_TIMEOUT_SECONDS` configure the Python AI service boundary.
+- The Go client calls Python `POST /ai/v1/game-prep` for draft topic, summary, words, caller style, and theme prompt placeholders.
+- Local disabled mode returns deterministic placeholder content so tests and smoke flows do not need Python or Azure.
+- `content_generation_jobs`, `generated_game_content`, and `game_run_content_reviews` persist generation status, provider metadata, generated words, current edited words, review window timestamps, lock timestamp, and host edits.
+- Manual host/admin endpoints exist for local testing the future T-60 prep and T-30 lock jobs.
+- Lock freezes the final content, blocks later edits, creates an approved `ai_generated` word set, and associates the game run with that word set so existing card assignment can continue through the deterministic word-set path.
+
+The follow-on autonomous game-prep slice is now implemented too.
+
+- `game_call_deck` stores the locked post-content randomization using a stored seed and shuffle version.
+- Live `POST /api/v1/games/{gameID}/calls` follows the locked deck when present and preserves the older active-word fallback for local/demo games without a deck.
+- `caller_assets` stores deck-linked caller lines, provider/status, optional audio URL/storage key, and fallback text so live gameplay does not wait on Azure Speech.
+- `delivery_batches` and `delivery_attempts` store local/mock player-invite delivery attempts with `/join?code={CODE}` links; real Graph/Teams/email delivery remains behind the delivery boundary.
+- `POST /api/v1/games/{gameID}/lobby/open` is the manual T-10 hook, and player avatar profile fields are persisted on `players`.
+- `theme_generation_jobs`, `themes`, and `theme_approvals` store structured AI theme drafts, host edits, approval/rejection, and game settings application.
+
+Still deferred from this track: frontend wiring, real Graph/Teams/email delivery, Azure Speech execution/storage integration, Azure deployment, rewards, voice claim recordings/voice consent flows, and lobby chat.
 
 ## Realtime Backbone Status
 
@@ -157,6 +195,7 @@ The realtime backbone is implemented in the Go backend as a Postgres-backed even
 
 - `game_event_outbox` stores committed gameplay events with `id`, `game_run_id`, `type`, `entity_id`, JSONB `payload`, per-game `sequence`, and `created_at`.
 - Mutations write outbox rows in the same database transactions as game creation, lifecycle transitions, player joins, card assignment, marks, calls, claim validation, winners, and third-winner game finish.
+- Auto-mark writes `card.auto_marked` outbox rows with compact counts so clients can refetch snapshots instead of replaying per-cell deltas.
 - `GET /api/v1/games/{gameID}/events` streams outbox rows in sequence order with Server-Sent Events, supports `Last-Event-ID` and `?lastEventId=`, sends heartbeat comments, and closes cleanly on request cancellation.
 - Payloads stay small; host and player screens should refetch snapshots after important events instead of treating SSE as the source of truth.
 - `cmd/realtime-loadtest` can simulate at least 50 player/SSE connections, word calls, mark bursts, claim submissions, and reconnect snapshot fetches against a running local API.
@@ -209,8 +248,17 @@ Player connection state is now persisted and visible:
 ### Phase 3: AI Content Review
 
 - `prompt_libraries`
-- `content_generation_jobs`
-- `generated_word_sets`
+- `content_generation_jobs` - implemented for game prep jobs.
+- `generated_game_content` - implemented for draft/current/locked content.
+- `game_run_content_reviews` - implemented for host edit history.
+- `generated_word_sets` - represented for this slice by approved `ai_generated` `word_sets` created at lock.
+- `game_call_deck` - implemented for deterministic locked call order.
+- `caller_assets` - implemented for generated/fallback caller line and audio metadata.
+- `delivery_batches` - implemented for local/mock delivery grouping.
+- `delivery_attempts` - implemented for local/mock invite attempts and retry records.
+- `theme_generation_jobs` - implemented for AI theme draft jobs.
+- `themes` - implemented for structured theme tokens and approval status.
+- `theme_approvals` - implemented for host approval/rejection history.
 - `content_approvals`
 - `content_audit_events`
 
@@ -247,4 +295,4 @@ Use local development placeholders where needed. For example, development auth c
 
 ## Immediate Next Backend Task
 
-The next backend-only step is contract hardening after smoke verification: tighten authorization around remaining player-owned write paths such as card assignment, card fetch, mark/unmark, and claim submission, then add any missing API contract tests needed before frontend wiring. Keep Teams/Graph/email, AI caller, Azure Speech, rewards, Azure deployment, Redis, Gorilla/WebSocket, and real Entra/JWKS validation deferred until the local game loop is wired and smoke-tested end to end.
+The next backend-only batch should avoid redoing the autonomous game-prep foundation. Remaining backend gaps are real delivery providers, Azure Speech/audio object storage integration, production Entra/JWKS validation, deployment worker wiring for the manual automation hooks, and later rewards/voice consent flows. Lobby chat and frontend wiring remain separate batches.

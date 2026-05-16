@@ -26,6 +26,13 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /api/v1/word-sets/{wordSetID}/words", s.createWordSetWord)
 	mux.HandleFunc("PATCH /api/v1/word-sets/{wordSetID}/words/{wordID}", s.updateWordSetWord)
 	mux.HandleFunc("DELETE /api/v1/word-sets/{wordSetID}/words/{wordID}", s.deleteWordSetWord)
+	mux.HandleFunc("POST /api/v1/themes/generate", s.generateTheme)
+	mux.HandleFunc("GET /api/v1/themes/{themeID}", s.getTheme)
+	mux.HandleFunc("PATCH /api/v1/themes/{themeID}", s.updateTheme)
+	mux.HandleFunc("POST /api/v1/themes/{themeID}/approve", s.approveTheme)
+	mux.HandleFunc("POST /api/v1/themes/{themeID}/reject", s.rejectTheme)
+	mux.HandleFunc("GET /api/v1/theme-assets", s.listThemeAssets)
+	mux.HandleFunc("POST /api/v1/deliveries/{deliveryID}/retry", s.retryDelivery)
 	mux.HandleFunc("POST /api/v1/games", s.createGame)
 	mux.HandleFunc("GET /api/v1/games", s.listGames)
 	mux.HandleFunc("/api/v1/games/", s.dispatchGameRoute)
@@ -102,6 +109,65 @@ func (s *Server) dispatchGameRoute(w http.ResponseWriter, r *http.Request) {
 	case "activity":
 		if r.Method == http.MethodGet && len(segments) == 2 {
 			s.listActivityEvents(w, r)
+			return
+		}
+	case "settings":
+		if len(segments) == 2 {
+			if r.Method == http.MethodGet {
+				s.getGameSettings(w, r)
+				return
+			}
+			if r.Method == http.MethodPatch {
+				s.updateGameSettings(w, r)
+				return
+			}
+		}
+	case "content":
+		if len(segments) == 2 {
+			if r.Method == http.MethodGet {
+				s.getGameContent(w, r)
+				return
+			}
+			if r.Method == http.MethodPatch {
+				s.updateGameContent(w, r)
+				return
+			}
+		}
+		if len(segments) == 3 && segments[2] == "prepare" && r.Method == http.MethodPost {
+			s.prepareGameContent(w, r)
+			return
+		}
+		if len(segments) == 3 && segments[2] == "lock" && r.Method == http.MethodPost {
+			s.lockGameContent(w, r)
+			return
+		}
+	case "caller-assets":
+		if len(segments) == 3 && segments[2] == "generate" && r.Method == http.MethodPost {
+			s.generateCallerAssets(w, r)
+			return
+		}
+	case "deliveries":
+		if len(segments) == 2 && r.Method == http.MethodGet {
+			s.listDeliveries(w, r)
+			return
+		}
+		if len(segments) == 3 && segments[2] == "player-invites" && r.Method == http.MethodPost {
+			s.sendPlayerInvites(w, r)
+			return
+		}
+	case "lobby":
+		if len(segments) == 3 && segments[2] == "open" && r.Method == http.MethodPost {
+			s.openLobby(w, r)
+			return
+		}
+	case "theme":
+		if len(segments) == 2 && r.Method == http.MethodPost {
+			s.applyThemeToGame(w, r)
+			return
+		}
+	case "auto-mark":
+		if len(segments) == 3 && segments[2] == "run" && r.Method == http.MethodPost {
+			s.runAutoMark(w, r)
 			return
 		}
 	case "events":
@@ -223,6 +289,24 @@ func (s *Server) dispatchCurrentPlayerRoute(w http.ResponseWriter, r *http.Reque
 		s.heartbeatCurrentPlayer(w, r)
 		return
 	}
+	if len(segments) == 4 && segments[3] == "preferences" {
+		if r.Method == http.MethodGet {
+			s.getCurrentPlayerPreferences(w, r)
+			return
+		}
+		if r.Method == http.MethodPatch {
+			s.updateCurrentPlayerPreferences(w, r)
+			return
+		}
+	}
+	if len(segments) == 4 && segments[3] == "claim-readiness" && r.Method == http.MethodGet {
+		s.getCurrentPlayerClaimReadiness(w, r)
+		return
+	}
+	if len(segments) == 4 && segments[3] == "profile" && r.Method == http.MethodPatch {
+		s.updateCurrentPlayerProfile(w, r)
+		return
+	}
 	if len(segments) == 4 && segments[3] == "card" {
 		if r.Method == http.MethodPost {
 			s.assignCurrentPlayerCard(w, r)
@@ -245,18 +329,24 @@ func (s *Server) dispatchCurrentPlayerRoute(w http.ResponseWriter, r *http.Reque
 func (s *Server) getConfig(w http.ResponseWriter, r *http.Request) {
 	authMode := s.authMode()
 	writeData(w, http.StatusOK, map[string]any{
-		"service":  "virtual-bingo-api",
-		"version":  apiVersion,
-		"appEnv":   s.appEnv(),
-		"authMode": authMode,
+		"service":    "virtual-bingo-api",
+		"version":    apiVersion,
+		"apiVersion": apiVersion,
+		"appEnv":     s.appEnv(),
+		"authMode":   authMode,
 		"capabilities": map[string]bool{
 			"sseEvents":      true,
 			"devAuth":        authMode == "dev",
 			"entraReadyAuth": authMode == "entra-ready",
+			"gameSettings":   true,
+			"autoMark":       true,
+			"aiContent":      true,
+			"voiceClaims":    false,
+			"aiCaller":       true,
+			"themeGenerator": true,
+			"teamsApp":       false,
+			"automation":     true,
 			"rewards":        false,
-			"automation":     false,
-			"aiContent":      false,
-			"voice":          false,
 		},
 		"playerConnection": map[string]any{
 			"timeoutSeconds":       int(s.cfg.PlayerConnectionTimeout.Seconds()),

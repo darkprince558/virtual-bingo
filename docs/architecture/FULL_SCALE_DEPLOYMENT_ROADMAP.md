@@ -4,6 +4,10 @@ Last updated: 2026-05-15
 
 This document captures the larger product direction beyond the current Production V1 gameplay foundation. The goal is not only a locally playable bingo app. The goal is a full CGI-internal Microsoft-integrated cloud platform with real auth, scalable realtime play, autonomous weekly game operations, Microsoft 365 delivery, AI content, AI voice calling, operational auditability, and Azure deployment.
 
+Related feature/API backlog:
+
+- `FULL_SCALE_FEATURE_API_BACKLOG.md` covers Teams app access, voice Bingo claims, auto-mark mode, AI caller sentences/audio, and AI theme generation.
+
 ## Guiding Principle
 
 Postgres remains the authoritative source of truth. Every other system is a delivery, automation, cache, fanout, or integration layer.
@@ -29,10 +33,14 @@ The full platform should support:
 - SSE support and an intentional WebSocket transport when richer bidirectional realtime is needed.
 - Weekly scheduled games.
 - Microsoft Graph email invites, reminders, winner emails, and host summaries.
+- Microsoft Teams app/tab access so players can play in Teams.
 - Teams notification support after email delivery is stable.
 - AI-generated bingo content with host review and auto-approval fallback rules.
-- AI caller orchestration driven by committed game events.
+- AI caller orchestration driven by committed game events, with full caller sentences that include the called words.
 - Azure Speech text-to-speech for caller audio.
+- Host-controlled voice Bingo claims, including short player recordings that can play back to the game.
+- Host-controlled manual, assisted, or auto-mark gameplay modes.
+- AI-generated game themes using safe structured theme tokens and approved visual assets.
 - Rewards provider adapter and winner fulfillment state.
 - Admin-visible game history and audit trails.
 - Azure deployment with managed secrets, logs, metrics, and migration runbooks.
@@ -129,6 +137,7 @@ Automate player and host communication.
 - Winner emails.
 - Host summary emails.
 - Delivery logs and retry statuses.
+- Teams app/tab packaging for in-Teams gameplay.
 - Teams notification support after email works.
 
 Why seventh: messages should be driven by scheduled game state and committed events, not ad hoc UI actions.
@@ -146,19 +155,22 @@ Add AI-generated game content with review controls.
 
 Why eighth: AI content is valuable only when hosts can trust, review, and reuse it.
 
-### 9. AI Caller And Azure Speech
+### 9. AI Caller, Voice Claims, Themes, And Azure Speech
 
-Build the caller on top of the realtime/event pipeline.
+Build the caller and fun gameplay layer on top of the realtime/event pipeline.
 
 - Caller state machine driven by committed game events.
 - Call cadence and pause/resume behavior.
-- Caller script generation.
+- Caller sentence generation where the committed called word appears clearly in the sentence.
 - Azure Speech text-to-speech generation.
 - Audio asset caching or streaming strategy.
 - Voice selection.
+- Voice Bingo claim mode with short claim-scoped recordings and optional game-wide playback.
+- Manual, assisted, and auto-mark gameplay settings.
+- Safe AI theme generation from host prompts such as "Christmas", returning structured theme tokens rather than arbitrary CSS.
 - Admin-managed consent flow before any employee voice-profile work.
 
-Why ninth: AI voice depends on reliable calls, pause/resume, event delivery, and host controls.
+Why ninth: AI voice and fun gameplay features depend on reliable calls, pause/resume, event delivery, host controls, and a stable frontend theme system.
 
 ### 10. Rewards And Fulfillment
 

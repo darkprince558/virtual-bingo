@@ -61,6 +61,83 @@ type GameRunSummary struct {
 	PlayerCount        int
 }
 
+type GameRunSettings struct {
+	GameRunID                    string
+	MarkingMode                  string
+	AllowPlayerMarkingModeChoice bool
+	ShowClaimReadiness           bool
+	VoiceClaimMode               string
+	VoiceClaimAutoplay           bool
+	CallerMode                   string
+	ThemeMode                    string
+	ThemeID                      *string
+	CreatedAt                    time.Time
+	UpdatedAt                    time.Time
+}
+
+type ThemeTokens struct {
+	Name          string         `json:"name"`
+	Summary       string         `json:"summary"`
+	Palette       map[string]any `json:"palette"`
+	Icons         []string       `json:"icons"`
+	Decorations   []string       `json:"decorations"`
+	Motion        string         `json:"motion"`
+	CallerTone    string         `json:"callerTone"`
+	Accessibility map[string]any `json:"accessibility"`
+}
+
+type ContentGenerationJob struct {
+	ID           string
+	GameRunID    string
+	JobType      string
+	Status       string
+	Provider     string
+	ErrorMessage *string
+	RetryCount   int
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type GeneratedGameContent struct {
+	ID                   string
+	GameRunID            string
+	GenerationJobID      *string
+	Status               string
+	Topic                string
+	Summary              string
+	GeneratedWords       []string
+	CurrentWords         []string
+	CallerStyle          *string
+	ThemePrompt          *string
+	ReviewWindowOpensAt  *time.Time
+	ReviewWindowClosesAt *time.Time
+	LockedAt             *time.Time
+	LockedWordSetID      *string
+	GenerationProvider   string
+	GenerationError      *string
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+}
+
+type GameRunContentReview struct {
+	ID            string
+	GameRunID     string
+	ContentID     string
+	ActorUserID   *string
+	EditedTopic   *string
+	EditedSummary *string
+	EditedWords   []string
+	CallerStyle   *string
+	CreatedAt     time.Time
+}
+
+type PlayerPreferences struct {
+	PlayerID    string
+	MarkingMode *string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
 type AllowedPlayer struct {
 	ID          string
 	GameRunID   string
@@ -76,6 +153,9 @@ type Player struct {
 	UserID          *string
 	Email           string
 	DisplayName     string
+	Icon            *string
+	AvatarColor     *string
+	AvatarLabel     *string
 	ConnectionState string
 	State           string
 	JoinedAt        time.Time
@@ -113,6 +193,37 @@ type CalledWord struct {
 	Sequence       int
 	CalledAt       time.Time
 	CreatedAt      time.Time
+	CallerAsset    *CallerAsset
+}
+
+type GameCallDeckItem struct {
+	ID             string
+	GameRunID      string
+	WordSetWordID  *string
+	Word           string
+	Sequence       int
+	ShuffleSeed    string
+	ShuffleVersion string
+	LockedAt       time.Time
+	CalledWordID   *string
+	CreatedAt      time.Time
+}
+
+type CallerAsset struct {
+	ID             string
+	GameRunID      string
+	CallDeckItemID string
+	Word           string
+	Sequence       int
+	Line           string
+	AudioURL       *string
+	StorageKey     *string
+	VoiceName      *string
+	Provider       string
+	Status         string
+	ErrorReason    *string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 type BingoClaim struct {
@@ -175,31 +286,115 @@ type ActivityEvent struct {
 }
 
 type HostSnapshot struct {
-	GameRun     GameRun
-	Status      string
-	CurrentWord *CalledWord
-	Pattern     string
-	PlayerCount int
-	Players     []Player
-	CalledWords []CalledWord
-	Claims      []BingoClaim
-	Winners     []Winner
+	GameRun            GameRun
+	Settings           GameRunSettings
+	Status             string
+	CurrentWord        *CalledWord
+	CurrentCallerAsset *CallerAsset
+	AppliedTheme       *Theme
+	Pattern            string
+	PlayerCount        int
+	Players            []Player
+	CalledWords        []CalledWord
+	Claims             []BingoClaim
+	Winners            []Winner
 }
 
 type PlayerSnapshot struct {
-	GameRun         GameRun
-	Status          string
-	CurrentWord     *CalledWord
-	Pattern         string
-	Player          Player
-	Card            *BingoCard
-	CalledWords     []CalledWord
-	Claims          []BingoClaim
-	Winners         []Winner
-	ReconnectNotice *ReconnectNotice
+	GameRun            GameRun
+	Settings           GameRunSettings
+	MarkingMode        string
+	Status             string
+	CurrentWord        *CalledWord
+	CurrentCallerAsset *CallerAsset
+	AppliedTheme       *Theme
+	Pattern            string
+	Player             Player
+	Card               *BingoCard
+	CalledWords        []CalledWord
+	Claims             []BingoClaim
+	Winners            []Winner
+	ReconnectNotice    *ReconnectNotice
 }
 
 type ReconnectNotice struct {
 	LastSeenAt        time.Time
 	MissedCalledWords []CalledWord
+}
+
+type ClaimReadiness struct {
+	Ready             bool
+	SupportedPatterns []string
+	ReadyPatterns     []string
+	BestPattern       string
+	MatchedCells      []BingoCardCell
+	MissingCells      []BingoCardCell
+	Reason            string
+}
+
+type DeliveryBatch struct {
+	ID        string
+	GameRunID string
+	Channel   string
+	Purpose   string
+	Status    string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type DeliveryAttempt struct {
+	ID              string
+	BatchID         string
+	GameRunID       string
+	Channel         string
+	Purpose         string
+	RecipientEmail  string
+	RecipientUserID *string
+	Subject         string
+	TemplateKey     string
+	BodyPreview     string
+	LinkURL         string
+	GameCode        string
+	Status          string
+	ErrorReason     *string
+	SentAt          *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type ThemeGenerationJob struct {
+	ID           string
+	GameRunID    *string
+	Status       string
+	Provider     string
+	Prompt       string
+	ErrorMessage *string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+}
+
+type Theme struct {
+	ID               string
+	GameRunID        *string
+	GenerationJobID  *string
+	Name             string
+	Summary          string
+	Tokens           ThemeTokens
+	Status           string
+	Provider         string
+	CreatedByUserID  *string
+	ApprovedByUserID *string
+	ApprovedAt       *time.Time
+	RejectedAt       *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+type ThemeApproval struct {
+	ID          string
+	ThemeID     string
+	GameRunID   *string
+	ActorUserID *string
+	Status      string
+	CreatedAt   time.Time
 }

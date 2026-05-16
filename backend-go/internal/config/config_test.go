@@ -36,6 +36,28 @@ func TestLoadPlayerConnectionTimeoutConfig(t *testing.T) {
 	}
 }
 
+func TestLoadAIServiceConfig(t *testing.T) {
+	t.Setenv("AI_SERVICE_ENABLED", "true")
+	t.Setenv("AI_SERVICE_BASE_URL", "http://localhost:8000/")
+	t.Setenv("AI_SERVICE_TIMEOUT_SECONDS", "7")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	if !cfg.AIServiceEnabled || cfg.AIServiceBaseURL != "http://localhost:8000" || cfg.AIServiceTimeout.Seconds() != 7 {
+		t.Fatalf("unexpected AI config: %+v", cfg)
+	}
+}
+
+func TestLoadRejectsEnabledAIServiceWithoutBaseURL(t *testing.T) {
+	t.Setenv("AI_SERVICE_ENABLED", "true")
+
+	if _, err := Load(); err == nil {
+		t.Fatal("expected enabled AI service without base URL to fail")
+	}
+}
+
 func TestLoadRejectsUnsupportedAuthMode(t *testing.T) {
 	t.Setenv("AUTH_MODE", "magic")
 

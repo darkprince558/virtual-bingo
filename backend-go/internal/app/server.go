@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/darkprince558/virtual-bingo/backend-go/internal/ai"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/audit"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/auth"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/clock"
@@ -36,12 +37,17 @@ func NewServer(cfg config.Config, logger *slog.Logger, database *db.Pool) *http.
 	if database != nil {
 		pinger = database
 		store := db.NewStore(database)
+		var aiClient ai.Client = ai.DisabledClient{}
+		if cfg.AIServiceEnabled {
+			aiClient = ai.NewHTTPClient(cfg.AIServiceBaseURL, cfg.AIServiceTimeout)
+		}
 		service = game.NewService(game.ServiceConfig{
 			Store:         store,
 			Authenticator: newAuthenticator(cfg),
 			Publisher:     events.NoopPublisher{},
 			AuditLogger:   audit.NewStoreLogger(store),
 			Clock:         clock.SystemClock{},
+			AIClient:      aiClient,
 		})
 	}
 

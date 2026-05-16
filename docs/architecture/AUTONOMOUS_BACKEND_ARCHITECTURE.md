@@ -39,6 +39,7 @@ These are the architecture decisions from the latest product direction.
 - Usually one game runs at a time, but multiple concurrent games should be supported.
 - Deployment target is Azure.
 - The actual game will happen inside the web app for now; Teams and Outlook are invite, reminder, notification, and re-entry channels.
+- The full-scale experience should also support the web app as a Microsoft Teams app/tab, so players can play inside Teams while the backend remains the source of truth.
 - Players should be able to disconnect and rejoin into the live game from invite/sign-in.
 - Game invite links should map to a backend allowlist. If the signed-in CGI/Microsoft user matches the allowed player list for that run, they can join.
 - Game patterns should default to random, but hosts can choose allowed patterns manually.
@@ -53,6 +54,10 @@ These are the architecture decisions from the latest product direction.
 - Managers do not need a deep audit trail, but admins need useful game history and winner/result details.
 - On-screen summary and winner-list email are needed first.
 - AI caller voice is important and should feel like a live person calling bingo.
+- AI caller output should use full sentences that clearly contain the committed called word, with simple fallback text/audio if generation fails.
+- Hosts should be able to configure optional fun gameplay modes such as voice Bingo claims, auto-mark/assist marking, and generated visual themes.
+- Voice Bingo claims should be short claim-scoped recordings; if enabled, the player says "Bingo" after pressing claim and the recording can be played to the game as a shared live moment.
+- AI-generated themes should produce structured theme tokens and approved asset references, not arbitrary CSS or executable code.
 - Employee voice profiles will be created from team employee recordings with consent. Admins can add/remove/manage voices. Hosts can select specific approved voices or use automatic voice selection.
 - Azure services are the primary AI/cloud provider direction.
 - The app should be available to CGI partners broadly, but each game run has host-managed player access.

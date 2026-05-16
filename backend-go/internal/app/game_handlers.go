@@ -40,6 +40,55 @@ type submitBingoClaimRequest struct {
 	Pattern  string `json:"pattern"`
 }
 
+type updateGameSettingsRequest struct {
+	MarkingMode                  *string `json:"markingMode"`
+	AllowPlayerMarkingModeChoice *bool   `json:"allowPlayerMarkingModeChoice"`
+	ShowClaimReadiness           *bool   `json:"showClaimReadiness"`
+	VoiceClaimMode               *string `json:"voiceClaimMode"`
+	VoiceClaimAutoplay           *bool   `json:"voiceClaimAutoplay"`
+	CallerMode                   *string `json:"callerMode"`
+	ThemeMode                    *string `json:"themeMode"`
+	ThemeID                      *string `json:"themeId"`
+}
+
+type updateGameContentRequest struct {
+	Topic       *string   `json:"topic"`
+	Summary     *string   `json:"summary"`
+	Words       *[]string `json:"words"`
+	CallerStyle *string   `json:"callerStyle"`
+}
+
+type updatePlayerProfileRequest struct {
+	Icon        string `json:"icon"`
+	AvatarColor string `json:"avatarColor"`
+	AvatarLabel string `json:"avatarLabel"`
+}
+
+type generateThemeRequest struct {
+	GameRunID *string `json:"gameRunId"`
+	Prompt    string  `json:"prompt"`
+	Tone      string  `json:"tone"`
+}
+
+type updateThemeRequest struct {
+	Name          *string        `json:"name"`
+	Summary       *string        `json:"summary"`
+	Palette       map[string]any `json:"palette"`
+	Icons         []string       `json:"icons"`
+	Decorations   []string       `json:"decorations"`
+	Motion        string         `json:"motion"`
+	CallerTone    string         `json:"callerTone"`
+	Accessibility map[string]any `json:"accessibility"`
+}
+
+type applyThemeRequest struct {
+	ThemeID string `json:"themeId"`
+}
+
+type updatePlayerPreferencesRequest struct {
+	MarkingMode *string `json:"markingMode"`
+}
+
 func (s *Server) createGame(w http.ResponseWriter, r *http.Request) {
 	if !requireDatabase(w, s.service) {
 		return
@@ -228,6 +277,490 @@ func (s *Server) listAllowedPlayers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeData(w, http.StatusOK, response)
+}
+
+func (s *Server) getGameSettings(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	settings, err := s.service.GetGameSettings(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, gameSettingsResponseFromDomain(settings))
+}
+
+func (s *Server) updateGameSettings(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	var req updateGameSettingsRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "validation_error", "request body must be valid JSON")
+		return
+	}
+
+	settings, err := s.service.UpdateGameSettings(r.Context(), principal, game.UpdateGameSettingsInput{
+		GameRunID:                    r.PathValue("gameID"),
+		MarkingMode:                  req.MarkingMode,
+		AllowPlayerMarkingModeChoice: req.AllowPlayerMarkingModeChoice,
+		ShowClaimReadiness:           req.ShowClaimReadiness,
+		VoiceClaimMode:               req.VoiceClaimMode,
+		VoiceClaimAutoplay:           req.VoiceClaimAutoplay,
+		CallerMode:                   req.CallerMode,
+		ThemeMode:                    req.ThemeMode,
+		ThemeID:                      req.ThemeID,
+	})
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, gameSettingsResponseFromDomain(settings))
+}
+
+func (s *Server) getCurrentPlayerPreferences(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	preferences, err := s.service.GetCurrentPlayerPreferences(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, playerPreferencesResponseFromDomain(preferences))
+}
+
+func (s *Server) updateCurrentPlayerPreferences(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	var req updatePlayerPreferencesRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "validation_error", "request body must be valid JSON")
+		return
+	}
+
+	preferences, err := s.service.UpdateCurrentPlayerPreferences(r.Context(), principal, game.UpdatePlayerPreferencesInput{
+		GameRunID:   r.PathValue("gameID"),
+		MarkingMode: req.MarkingMode,
+	})
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, playerPreferencesResponseFromDomain(preferences))
+}
+
+func (s *Server) runAutoMark(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	result, err := s.service.AutoMarkGame(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, autoMarkRunResponse{
+		PlayersScanned:     result.PlayersScanned,
+		PlayersMarked:      result.PlayersMarked,
+		CalledWordsScanned: result.CalledWordsScanned,
+		CellsMarked:        result.CellsMarked,
+		Mode:               result.Mode,
+		SkippedReason:      result.SkippedReason,
+	})
+}
+
+func (s *Server) prepareGameContent(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	content, err := s.service.PrepareGameContentForHost(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusCreated, gameContentResponseFromDomain(content))
+}
+
+func (s *Server) getGameContent(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	content, err := s.service.GetGeneratedGameContent(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, gameContentResponseFromDomain(content))
+}
+
+func (s *Server) updateGameContent(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	var req updateGameContentRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "validation_error", "request body must be valid JSON")
+		return
+	}
+	words := []string(nil)
+	hasWordPatch := req.Words != nil
+	if req.Words != nil {
+		words = *req.Words
+	}
+
+	content, err := s.service.UpdateGeneratedGameContent(r.Context(), principal, game.UpdateGeneratedContentInput{
+		GameRunID:    r.PathValue("gameID"),
+		Topic:        req.Topic,
+		Summary:      req.Summary,
+		Words:        words,
+		CallerStyle:  req.CallerStyle,
+		HasWordPatch: hasWordPatch,
+	})
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, gameContentResponseFromDomain(content))
+}
+
+func (s *Server) lockGameContent(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	content, err := s.service.LockGameContentForHost(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, gameContentResponseFromDomain(content))
+}
+
+func (s *Server) generateCallerAssets(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	assets, err := s.service.GenerateCallerAssets(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	response := make([]callerAssetResponse, 0, len(assets))
+	for _, asset := range assets {
+		response = append(response, callerAssetResponseFromDomain(asset))
+	}
+	writeData(w, http.StatusOK, response)
+}
+
+func (s *Server) sendPlayerInvites(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	attempts, err := s.service.SendMockPlayerInvites(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	writeData(w, http.StatusCreated, deliveryAttemptsResponseFromDomain(attempts))
+}
+
+func (s *Server) listDeliveries(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	attempts, err := s.service.ListDeliveries(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, deliveryAttemptsResponseFromDomain(attempts))
+}
+
+func (s *Server) retryDelivery(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	attempt, err := s.service.RetryDelivery(r.Context(), principal, r.PathValue("deliveryID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, deliveryAttemptResponseFromDomain(attempt))
+}
+
+func (s *Server) openLobby(w http.ResponseWriter, r *http.Request) {
+	s.lifecycleGame(w, r, s.service.OpenLobby)
+}
+
+func (s *Server) updateCurrentPlayerProfile(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	var req updatePlayerProfileRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "validation_error", "request body must be valid JSON")
+		return
+	}
+	player, err := s.service.UpdateCurrentPlayerProfile(r.Context(), principal, game.UpdatePlayerProfileInput{GameRunID: r.PathValue("gameID"), Icon: req.Icon, AvatarColor: req.AvatarColor, AvatarLabel: req.AvatarLabel})
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, playerResponseFromDomain(player))
+}
+
+func (s *Server) generateTheme(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	var req generateThemeRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "validation_error", "request body must be valid JSON")
+		return
+	}
+	theme, err := s.service.GenerateTheme(r.Context(), principal, game.GenerateThemeInput{GameRunID: req.GameRunID, Prompt: req.Prompt, Tone: req.Tone})
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	writeData(w, http.StatusCreated, themeResponseFromDomain(theme))
+}
+
+func (s *Server) getTheme(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	theme, err := s.service.GetTheme(r.Context(), principal, r.PathValue("themeID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, themeResponseFromDomain(theme))
+}
+
+func (s *Server) updateTheme(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	existing, err := s.service.GetTheme(r.Context(), principal, r.PathValue("themeID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	var req updateThemeRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "validation_error", "request body must be valid JSON")
+		return
+	}
+	tokens := existing.Tokens
+	if req.Palette != nil {
+		tokens.Palette = req.Palette
+	}
+	if req.Icons != nil {
+		tokens.Icons = req.Icons
+	}
+	if req.Decorations != nil {
+		tokens.Decorations = req.Decorations
+	}
+	if req.Motion != "" {
+		tokens.Motion = req.Motion
+	}
+	if req.CallerTone != "" {
+		tokens.CallerTone = req.CallerTone
+	}
+	if req.Accessibility != nil {
+		tokens.Accessibility = req.Accessibility
+	}
+	theme, err := s.service.UpdateTheme(r.Context(), principal, r.PathValue("themeID"), tokens, req.Name, req.Summary)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, themeResponseFromDomain(theme))
+}
+
+func (s *Server) approveTheme(w http.ResponseWriter, r *http.Request) {
+	s.setThemeApproval(w, r, true)
+}
+
+func (s *Server) rejectTheme(w http.ResponseWriter, r *http.Request) {
+	s.setThemeApproval(w, r, false)
+}
+
+func (s *Server) setThemeApproval(w http.ResponseWriter, r *http.Request, approved bool) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	theme, err := s.service.SetThemeApproval(r.Context(), principal, r.PathValue("themeID"), approved)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, themeResponseFromDomain(theme))
+}
+
+func (s *Server) applyThemeToGame(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	var req applyThemeRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "validation_error", "request body must be valid JSON")
+		return
+	}
+	settings, err := s.service.ApplyThemeToGame(r.Context(), principal, r.PathValue("gameID"), req.ThemeID)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+	writeData(w, http.StatusOK, gameSettingsResponseFromDomain(settings))
+}
+
+func (s *Server) listThemeAssets(w http.ResponseWriter, r *http.Request) {
+	writeData(w, http.StatusOK, game.ThemeAssetIDs())
+}
+
+func (s *Server) getCurrentPlayerClaimReadiness(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	readiness, err := s.service.GetCurrentPlayerClaimReadiness(r.Context(), principal, r.PathValue("gameID"))
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusOK, claimReadinessResponseFromDomain(readiness))
 }
 
 func (s *Server) joinPlayer(w http.ResponseWriter, r *http.Request) {
@@ -549,6 +1082,67 @@ type gameRunResponse struct {
 	UpdatedAt           time.Time  `json:"updatedAt"`
 }
 
+type gameSettingsResponse struct {
+	GameRunID                    string    `json:"gameRunId"`
+	MarkingMode                  string    `json:"markingMode"`
+	AllowPlayerMarkingModeChoice bool      `json:"allowPlayerMarkingModeChoice"`
+	ShowClaimReadiness           bool      `json:"showClaimReadiness"`
+	VoiceClaimMode               string    `json:"voiceClaimMode"`
+	VoiceClaimAutoplay           bool      `json:"voiceClaimAutoplay"`
+	CallerMode                   string    `json:"callerMode"`
+	ThemeMode                    string    `json:"themeMode"`
+	ThemeID                      *string   `json:"themeId,omitempty"`
+	CreatedAt                    time.Time `json:"createdAt"`
+	UpdatedAt                    time.Time `json:"updatedAt"`
+}
+
+type playerPreferencesResponse struct {
+	PlayerID    string    `json:"playerId"`
+	MarkingMode *string   `json:"markingMode"`
+	CreatedAt   time.Time `json:"createdAt"`
+	UpdatedAt   time.Time `json:"updatedAt"`
+}
+
+type autoMarkRunResponse struct {
+	PlayersScanned     int    `json:"playersScanned"`
+	PlayersMarked      int    `json:"playersMarked"`
+	CalledWordsScanned int    `json:"calledWordsScanned"`
+	CellsMarked        int    `json:"cellsMarked"`
+	Mode               string `json:"mode"`
+	SkippedReason      string `json:"skippedReason,omitempty"`
+}
+
+type gameContentResponse struct {
+	ID                   string     `json:"id"`
+	GameRunID            string     `json:"gameRunId"`
+	GenerationJobID      *string    `json:"generationJobId,omitempty"`
+	Status               string     `json:"status"`
+	Topic                string     `json:"topic"`
+	Summary              string     `json:"summary"`
+	Words                []string   `json:"words"`
+	GeneratedWords       []string   `json:"generatedWords,omitempty"`
+	CallerStyle          *string    `json:"callerStyle,omitempty"`
+	ThemePrompt          *string    `json:"themePrompt,omitempty"`
+	ReviewWindowOpensAt  *time.Time `json:"reviewWindowOpensAt,omitempty"`
+	ReviewWindowClosesAt *time.Time `json:"reviewWindowClosesAt,omitempty"`
+	LockedAt             *time.Time `json:"lockedAt,omitempty"`
+	LockedWordSetID      *string    `json:"lockedWordSetId,omitempty"`
+	GenerationProvider   string     `json:"generationProvider"`
+	GenerationError      *string    `json:"generationError,omitempty"`
+	CreatedAt            time.Time  `json:"createdAt"`
+	UpdatedAt            time.Time  `json:"updatedAt"`
+}
+
+type claimReadinessResponse struct {
+	Ready             bool               `json:"ready"`
+	SupportedPatterns []string           `json:"supportedPatterns"`
+	ReadyPatterns     []string           `json:"readyPatterns"`
+	BestPattern       string             `json:"bestPattern"`
+	MatchedCells      []cardCellResponse `json:"matchedCells"`
+	MissingCells      []cardCellResponse `json:"missingCells"`
+	Reason            string             `json:"reason"`
+}
+
 type allowedPlayerResponse struct {
 	ID          string    `json:"id"`
 	GameRunID   string    `json:"gameRunId"`
@@ -564,6 +1158,9 @@ type playerResponse struct {
 	UserID          *string                  `json:"userId,omitempty"`
 	Email           string                   `json:"email"`
 	DisplayName     string                   `json:"displayName"`
+	Icon            *string                  `json:"icon,omitempty"`
+	AvatarColor     *string                  `json:"avatarColor,omitempty"`
+	AvatarLabel     *string                  `json:"avatarLabel,omitempty"`
 	ConnectionState string                   `json:"connectionState"`
 	State           string                   `json:"state"`
 	JoinedAt        time.Time                `json:"joinedAt"`
@@ -590,14 +1187,59 @@ type cardCellResponse struct {
 }
 
 type calledWordResponse struct {
-	ID             string    `json:"id"`
-	GameRunID      string    `json:"gameRunId"`
-	WordSetWordID  *string   `json:"wordSetWordId,omitempty"`
-	Word           string    `json:"word"`
-	CalledByUserID *string   `json:"calledByUserId,omitempty"`
-	Sequence       int       `json:"sequence"`
-	CalledAt       time.Time `json:"calledAt"`
-	CreatedAt      time.Time `json:"createdAt"`
+	ID             string               `json:"id"`
+	GameRunID      string               `json:"gameRunId"`
+	WordSetWordID  *string              `json:"wordSetWordId,omitempty"`
+	Word           string               `json:"word"`
+	CalledByUserID *string              `json:"calledByUserId,omitempty"`
+	Sequence       int                  `json:"sequence"`
+	CalledAt       time.Time            `json:"calledAt"`
+	CreatedAt      time.Time            `json:"createdAt"`
+	CallerAsset    *callerAssetResponse `json:"callerAsset,omitempty"`
+}
+
+type callerAssetResponse struct {
+	ID             string  `json:"id"`
+	GameRunID      string  `json:"gameRunId"`
+	CallDeckItemID string  `json:"callDeckItemId"`
+	Word           string  `json:"word"`
+	Sequence       int     `json:"sequence"`
+	Line           string  `json:"line"`
+	AudioURL       *string `json:"audioUrl,omitempty"`
+	StorageKey     *string `json:"storageKey,omitempty"`
+	VoiceName      *string `json:"voiceName,omitempty"`
+	Provider       string  `json:"provider"`
+	Status         string  `json:"status"`
+	ErrorReason    *string `json:"errorReason,omitempty"`
+}
+
+type deliveryAttemptResponse struct {
+	ID             string     `json:"id"`
+	GameRunID      string     `json:"gameRunId"`
+	Channel        string     `json:"channel"`
+	Purpose        string     `json:"purpose"`
+	RecipientEmail string     `json:"recipientEmail"`
+	Subject        string     `json:"subject"`
+	TemplateKey    string     `json:"templateKey"`
+	BodyPreview    string     `json:"bodyPreview"`
+	LinkURL        string     `json:"linkUrl"`
+	GameCode       string     `json:"gameCode"`
+	Status         string     `json:"status"`
+	ErrorReason    *string    `json:"errorReason,omitempty"`
+	SentAt         *time.Time `json:"sentAt,omitempty"`
+	CreatedAt      time.Time  `json:"createdAt"`
+}
+
+type themeResponse struct {
+	ID        string             `json:"id"`
+	GameRunID *string            `json:"gameRunId,omitempty"`
+	Name      string             `json:"name"`
+	Summary   string             `json:"summary"`
+	Tokens    domain.ThemeTokens `json:"tokens"`
+	Status    string             `json:"status"`
+	Provider  string             `json:"provider"`
+	CreatedAt time.Time          `json:"createdAt"`
+	UpdatedAt time.Time          `json:"updatedAt"`
 }
 
 type claimResponse struct {
@@ -643,28 +1285,36 @@ type gameSummaryResponse struct {
 }
 
 type hostSnapshotResponse struct {
-	GameRun        gameRunResponse      `json:"gameRun"`
-	Status         string               `json:"status"`
-	CurrentWord    *calledWordResponse  `json:"currentWord,omitempty"`
-	WinningPattern string               `json:"winningPattern"`
-	PlayerCount    int                  `json:"playerCount"`
-	Players        []playerResponse     `json:"players"`
-	CalledWords    []calledWordResponse `json:"calledWords"`
-	Claims         []claimResponse      `json:"claims"`
-	Winners        []winnerResponse     `json:"winners"`
+	GameRun            gameRunResponse      `json:"gameRun"`
+	Settings           gameSettingsResponse `json:"settings"`
+	Status             string               `json:"status"`
+	CurrentWord        *calledWordResponse  `json:"currentWord,omitempty"`
+	CurrentCallerAsset *callerAssetResponse `json:"currentCallerAsset,omitempty"`
+	AppliedTheme       *themeResponse       `json:"appliedTheme,omitempty"`
+	WinningPattern     string               `json:"winningPattern"`
+	PlayerCount        int                  `json:"playerCount"`
+	Players            []playerResponse     `json:"players"`
+	CalledWords        []calledWordResponse `json:"calledWords"`
+	Claims             []claimResponse      `json:"claims"`
+	Winners            []winnerResponse     `json:"winners"`
 }
 
 type playerSnapshotResponse struct {
-	GameRun         gameRunResponse          `json:"gameRun"`
-	Status          string                   `json:"status"`
-	CurrentWord     *calledWordResponse      `json:"currentWord,omitempty"`
-	WinningPattern  string                   `json:"winningPattern"`
-	Player          playerResponse           `json:"player"`
-	Card            *cardResponse            `json:"card,omitempty"`
-	CalledWords     []calledWordResponse     `json:"calledWords"`
-	Claims          []claimResponse          `json:"claims"`
-	Winners         []winnerResponse         `json:"winners"`
-	ReconnectNotice *reconnectNoticeResponse `json:"reconnectNotice,omitempty"`
+	GameRun                      gameRunResponse          `json:"gameRun"`
+	MarkingMode                  string                   `json:"markingMode"`
+	AllowPlayerMarkingModeChoice bool                     `json:"allowPlayerMarkingModeChoice"`
+	ShowClaimReadiness           bool                     `json:"showClaimReadiness"`
+	Status                       string                   `json:"status"`
+	CurrentWord                  *calledWordResponse      `json:"currentWord,omitempty"`
+	CurrentCallerAsset           *callerAssetResponse     `json:"currentCallerAsset,omitempty"`
+	AppliedTheme                 *themeResponse           `json:"appliedTheme,omitempty"`
+	WinningPattern               string                   `json:"winningPattern"`
+	Player                       playerResponse           `json:"player"`
+	Card                         *cardResponse            `json:"card,omitempty"`
+	CalledWords                  []calledWordResponse     `json:"calledWords"`
+	Claims                       []claimResponse          `json:"claims"`
+	Winners                      []winnerResponse         `json:"winners"`
+	ReconnectNotice              *reconnectNoticeResponse `json:"reconnectNotice,omitempty"`
 }
 
 type eventResponse struct {
@@ -702,6 +1352,75 @@ func gameRunResponseFromDomain(run game.GameRunWithCounts) gameRunResponse {
 	}
 }
 
+func gameSettingsResponseFromDomain(settings domain.GameRunSettings) gameSettingsResponse {
+	return gameSettingsResponse{
+		GameRunID:                    settings.GameRunID,
+		MarkingMode:                  settings.MarkingMode,
+		AllowPlayerMarkingModeChoice: settings.AllowPlayerMarkingModeChoice,
+		ShowClaimReadiness:           settings.ShowClaimReadiness,
+		VoiceClaimMode:               settings.VoiceClaimMode,
+		VoiceClaimAutoplay:           settings.VoiceClaimAutoplay,
+		CallerMode:                   settings.CallerMode,
+		ThemeMode:                    settings.ThemeMode,
+		ThemeID:                      settings.ThemeID,
+		CreatedAt:                    settings.CreatedAt,
+		UpdatedAt:                    settings.UpdatedAt,
+	}
+}
+
+func playerPreferencesResponseFromDomain(preferences domain.PlayerPreferences) playerPreferencesResponse {
+	return playerPreferencesResponse{
+		PlayerID:    preferences.PlayerID,
+		MarkingMode: preferences.MarkingMode,
+		CreatedAt:   preferences.CreatedAt,
+		UpdatedAt:   preferences.UpdatedAt,
+	}
+}
+
+func gameContentResponseFromDomain(content domain.GeneratedGameContent) gameContentResponse {
+	return gameContentResponse{
+		ID:                   content.ID,
+		GameRunID:            content.GameRunID,
+		GenerationJobID:      content.GenerationJobID,
+		Status:               content.Status,
+		Topic:                content.Topic,
+		Summary:              content.Summary,
+		Words:                content.CurrentWords,
+		GeneratedWords:       content.GeneratedWords,
+		CallerStyle:          content.CallerStyle,
+		ThemePrompt:          content.ThemePrompt,
+		ReviewWindowOpensAt:  content.ReviewWindowOpensAt,
+		ReviewWindowClosesAt: content.ReviewWindowClosesAt,
+		LockedAt:             content.LockedAt,
+		LockedWordSetID:      content.LockedWordSetID,
+		GenerationProvider:   content.GenerationProvider,
+		GenerationError:      content.GenerationError,
+		CreatedAt:            content.CreatedAt,
+		UpdatedAt:            content.UpdatedAt,
+	}
+}
+
+func claimReadinessResponseFromDomain(readiness domain.ClaimReadiness) claimReadinessResponse {
+	matchedCells := make([]cardCellResponse, 0, len(readiness.MatchedCells))
+	for _, cell := range readiness.MatchedCells {
+		matchedCells = append(matchedCells, cardCellResponseFromDomain(cell))
+	}
+	missingCells := make([]cardCellResponse, 0, len(readiness.MissingCells))
+	for _, cell := range readiness.MissingCells {
+		missingCells = append(missingCells, cardCellResponseFromDomain(cell))
+	}
+
+	return claimReadinessResponse{
+		Ready:             readiness.Ready,
+		SupportedPatterns: readiness.SupportedPatterns,
+		ReadyPatterns:     readiness.ReadyPatterns,
+		BestPattern:       readiness.BestPattern,
+		MatchedCells:      matchedCells,
+		MissingCells:      missingCells,
+		Reason:            readiness.Reason,
+	}
+}
+
 func allowedPlayerResponseFromDomain(player domain.AllowedPlayer) allowedPlayerResponse {
 	return allowedPlayerResponse{
 		ID:          player.ID,
@@ -720,6 +1439,9 @@ func playerResponseFromDomain(player domain.Player) playerResponse {
 		UserID:          player.UserID,
 		Email:           player.Email,
 		DisplayName:     player.DisplayName,
+		Icon:            player.Icon,
+		AvatarColor:     player.AvatarColor,
+		AvatarLabel:     player.AvatarLabel,
 		ConnectionState: player.ConnectionState,
 		State:           player.State,
 		JoinedAt:        player.JoinedAt,
@@ -761,7 +1483,7 @@ func cardResponseFromDomain(card domain.BingoCard) cardResponse {
 }
 
 func calledWordResponseFromDomain(calledWord domain.CalledWord) calledWordResponse {
-	return calledWordResponse{
+	response := calledWordResponse{
 		ID:             calledWord.ID,
 		GameRunID:      calledWord.GameRunID,
 		WordSetWordID:  calledWord.WordSetWordID,
@@ -770,6 +1492,69 @@ func calledWordResponseFromDomain(calledWord domain.CalledWord) calledWordRespon
 		Sequence:       calledWord.Sequence,
 		CalledAt:       calledWord.CalledAt,
 		CreatedAt:      calledWord.CreatedAt,
+	}
+	if calledWord.CallerAsset != nil {
+		asset := callerAssetResponseFromDomain(*calledWord.CallerAsset)
+		response.CallerAsset = &asset
+	}
+	return response
+}
+
+func callerAssetResponseFromDomain(asset domain.CallerAsset) callerAssetResponse {
+	return callerAssetResponse{
+		ID:             asset.ID,
+		GameRunID:      asset.GameRunID,
+		CallDeckItemID: asset.CallDeckItemID,
+		Word:           asset.Word,
+		Sequence:       asset.Sequence,
+		Line:           asset.Line,
+		AudioURL:       asset.AudioURL,
+		StorageKey:     asset.StorageKey,
+		VoiceName:      asset.VoiceName,
+		Provider:       asset.Provider,
+		Status:         asset.Status,
+		ErrorReason:    asset.ErrorReason,
+	}
+}
+
+func deliveryAttemptsResponseFromDomain(attempts []domain.DeliveryAttempt) []deliveryAttemptResponse {
+	response := make([]deliveryAttemptResponse, 0, len(attempts))
+	for _, attempt := range attempts {
+		response = append(response, deliveryAttemptResponseFromDomain(attempt))
+	}
+	return response
+}
+
+func deliveryAttemptResponseFromDomain(attempt domain.DeliveryAttempt) deliveryAttemptResponse {
+	return deliveryAttemptResponse{
+		ID:             attempt.ID,
+		GameRunID:      attempt.GameRunID,
+		Channel:        attempt.Channel,
+		Purpose:        attempt.Purpose,
+		RecipientEmail: attempt.RecipientEmail,
+		Subject:        attempt.Subject,
+		TemplateKey:    attempt.TemplateKey,
+		BodyPreview:    attempt.BodyPreview,
+		LinkURL:        attempt.LinkURL,
+		GameCode:       attempt.GameCode,
+		Status:         attempt.Status,
+		ErrorReason:    attempt.ErrorReason,
+		SentAt:         attempt.SentAt,
+		CreatedAt:      attempt.CreatedAt,
+	}
+}
+
+func themeResponseFromDomain(theme domain.Theme) themeResponse {
+	return themeResponse{
+		ID:        theme.ID,
+		GameRunID: theme.GameRunID,
+		Name:      theme.Name,
+		Summary:   theme.Summary,
+		Tokens:    theme.Tokens,
+		Status:    theme.Status,
+		Provider:  theme.Provider,
+		CreatedAt: theme.CreatedAt,
+		UpdatedAt: theme.UpdatedAt,
 	}
 }
 
@@ -880,17 +1665,30 @@ func hostSnapshotResponseFromDomain(snapshot domain.HostSnapshot) hostSnapshotRe
 		word := calledWordResponseFromDomain(*snapshot.CurrentWord)
 		currentWord = &word
 	}
+	var currentCallerAsset *callerAssetResponse
+	if snapshot.CurrentCallerAsset != nil {
+		asset := callerAssetResponseFromDomain(*snapshot.CurrentCallerAsset)
+		currentCallerAsset = &asset
+	}
+	var appliedTheme *themeResponse
+	if snapshot.AppliedTheme != nil {
+		theme := themeResponseFromDomain(*snapshot.AppliedTheme)
+		appliedTheme = &theme
+	}
 
 	return hostSnapshotResponse{
-		GameRun:        gameRunResponseFromDomain(game.GameRunWithCounts{GameRun: snapshot.GameRun}),
-		Status:         snapshot.Status,
-		CurrentWord:    currentWord,
-		WinningPattern: snapshot.Pattern,
-		PlayerCount:    snapshot.PlayerCount,
-		Players:        players,
-		CalledWords:    calledWords,
-		Claims:         claims,
-		Winners:        winners,
+		GameRun:            gameRunResponseFromDomain(game.GameRunWithCounts{GameRun: snapshot.GameRun}),
+		Settings:           gameSettingsResponseFromDomain(snapshot.Settings),
+		Status:             snapshot.Status,
+		CurrentWord:        currentWord,
+		CurrentCallerAsset: currentCallerAsset,
+		AppliedTheme:       appliedTheme,
+		WinningPattern:     snapshot.Pattern,
+		PlayerCount:        snapshot.PlayerCount,
+		Players:            players,
+		CalledWords:        calledWords,
+		Claims:             claims,
+		Winners:            winners,
 	}
 }
 
@@ -913,6 +1711,16 @@ func playerSnapshotResponseFromDomain(snapshot domain.PlayerSnapshot) playerSnap
 		word := calledWordResponseFromDomain(*snapshot.CurrentWord)
 		currentWord = &word
 	}
+	var currentCallerAsset *callerAssetResponse
+	if snapshot.CurrentCallerAsset != nil {
+		asset := callerAssetResponseFromDomain(*snapshot.CurrentCallerAsset)
+		currentCallerAsset = &asset
+	}
+	var appliedTheme *themeResponse
+	if snapshot.AppliedTheme != nil {
+		theme := themeResponseFromDomain(*snapshot.AppliedTheme)
+		appliedTheme = &theme
+	}
 	var card *cardResponse
 	if snapshot.Card != nil {
 		response := cardResponseFromDomain(*snapshot.Card)
@@ -920,16 +1728,21 @@ func playerSnapshotResponseFromDomain(snapshot domain.PlayerSnapshot) playerSnap
 	}
 
 	return playerSnapshotResponse{
-		GameRun:         gameRunResponseFromDomain(game.GameRunWithCounts{GameRun: snapshot.GameRun}),
-		Status:          snapshot.Status,
-		CurrentWord:     currentWord,
-		WinningPattern:  snapshot.Pattern,
-		Player:          playerResponseFromDomain(snapshot.Player),
-		Card:            card,
-		CalledWords:     calledWords,
-		Claims:          claims,
-		Winners:         winners,
-		ReconnectNotice: reconnectNoticeResponseFromDomain(snapshot.ReconnectNotice),
+		GameRun:                      gameRunResponseFromDomain(game.GameRunWithCounts{GameRun: snapshot.GameRun}),
+		MarkingMode:                  snapshot.MarkingMode,
+		AllowPlayerMarkingModeChoice: snapshot.Settings.AllowPlayerMarkingModeChoice,
+		ShowClaimReadiness:           snapshot.Settings.ShowClaimReadiness,
+		Status:                       snapshot.Status,
+		CurrentWord:                  currentWord,
+		CurrentCallerAsset:           currentCallerAsset,
+		AppliedTheme:                 appliedTheme,
+		WinningPattern:               snapshot.Pattern,
+		Player:                       playerResponseFromDomain(snapshot.Player),
+		Card:                         card,
+		CalledWords:                  calledWords,
+		Claims:                       claims,
+		Winners:                      winners,
+		ReconnectNotice:              reconnectNoticeResponseFromDomain(snapshot.ReconnectNotice),
 	}
 }
 

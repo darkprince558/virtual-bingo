@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/darkprince558/virtual-bingo/backend-go/internal/ai"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/audit"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/auth"
 	"github.com/darkprince558/virtual-bingo/backend-go/internal/bingo"
@@ -46,6 +47,33 @@ type Store interface {
 	DeleteAllowedPlayer(context.Context, string, string) (domain.AllowedPlayer, error)
 	ListAllowedPlayers(context.Context, string) ([]domain.AllowedPlayer, error)
 	GetAllowedPlayerByEmail(context.Context, string, string) (domain.AllowedPlayer, error)
+	GetOrCreateGameSettings(context.Context, string) (domain.GameRunSettings, error)
+	UpdateGameSettings(context.Context, db.UpdateGameSettingsParams) (domain.GameRunSettings, error)
+	GetOrCreatePlayerPreferences(context.Context, string, string) (domain.PlayerPreferences, error)
+	UpdatePlayerPreferences(context.Context, db.UpdatePlayerPreferencesParams) (domain.PlayerPreferences, error)
+	GetEffectivePlayerMarkingMode(context.Context, string, string) (string, error)
+	AutoMarkGame(context.Context, string) (db.AutoMarkRunResult, error)
+	CreateContentGenerationJob(context.Context, db.CreateContentGenerationJobParams) (domain.ContentGenerationJob, error)
+	UpdateContentGenerationJob(context.Context, db.UpdateContentGenerationJobParams) (domain.ContentGenerationJob, error)
+	GetGeneratedGameContent(context.Context, string) (domain.GeneratedGameContent, error)
+	UpsertGeneratedGameContent(context.Context, db.UpsertGeneratedGameContentParams) (domain.GeneratedGameContent, error)
+	UpdateGeneratedGameContent(context.Context, db.UpdateGeneratedGameContentParams) (domain.GeneratedGameContent, error)
+	LockGeneratedGameContent(context.Context, db.LockGeneratedGameContentParams) (db.LockGeneratedGameContentResult, error)
+	CreateGameCallDeck(context.Context, db.CreateGameCallDeckParams) ([]domain.GameCallDeckItem, error)
+	ListGameCallDeck(context.Context, string) ([]domain.GameCallDeckItem, error)
+	CreateCalledWordFromDeck(context.Context, db.CreateCalledWordParams) (domain.CalledWord, error)
+	UpsertCallerAsset(context.Context, db.CreateCallerAssetParams) (domain.CallerAsset, error)
+	ListCallerAssets(context.Context, string) ([]domain.CallerAsset, error)
+	CreateDeliveryBatch(context.Context, db.CreateDeliveryBatchParams) (domain.DeliveryBatch, []domain.DeliveryAttempt, error)
+	ListDeliveryAttempts(context.Context, string) ([]domain.DeliveryAttempt, error)
+	RetryDeliveryAttempt(context.Context, string) (domain.DeliveryAttempt, error)
+	UpdatePlayerProfile(context.Context, db.UpdatePlayerProfileParams) (domain.Player, error)
+	CreateThemeGenerationJob(context.Context, *string, string, string) (domain.ThemeGenerationJob, error)
+	CreateTheme(context.Context, db.CreateThemeParams) (domain.Theme, error)
+	GetTheme(context.Context, string) (domain.Theme, error)
+	UpdateTheme(context.Context, string, domain.ThemeTokens, *string, *string) (domain.Theme, error)
+	SetThemeApproval(context.Context, string, *string, bool) (domain.Theme, error)
+	ApplyThemeToGame(context.Context, string, string, *string) (domain.GameRunSettings, error)
 	CreatePlayer(context.Context, db.CreatePlayerParams) (domain.Player, error)
 	GetPlayer(context.Context, string, string) (domain.Player, error)
 	GetPlayerByGameRunAndEmail(context.Context, string, string) (domain.Player, error)
@@ -85,6 +113,7 @@ type ServiceConfig struct {
 	Publisher     events.Publisher
 	AuditLogger   audit.Logger
 	Clock         clock.Clock
+	AIClient      ai.Client
 }
 
 type Service struct {
@@ -93,6 +122,7 @@ type Service struct {
 	publisher     events.Publisher
 	auditLogger   audit.Logger
 	clock         clock.Clock
+	aiClient      ai.Client
 }
 
 func NewService(config ServiceConfig) *Service {
@@ -108,6 +138,9 @@ func NewService(config ServiceConfig) *Service {
 	if config.Authenticator == nil {
 		config.Authenticator = auth.DevAuthenticator{Enabled: true}
 	}
+	if config.AIClient == nil {
+		config.AIClient = ai.DisabledClient{}
+	}
 
 	return &Service{
 		store:         config.Store,
@@ -115,6 +148,7 @@ func NewService(config ServiceConfig) *Service {
 		publisher:     config.Publisher,
 		auditLogger:   config.AuditLogger,
 		clock:         config.Clock,
+		aiClient:      config.AIClient,
 	}
 }
 
@@ -505,6 +539,25 @@ func (s *Service) CallNextWord(ctx context.Context, principal auth.Principal, ga
 	if run.WordSetID == nil {
 		return domain.CalledWord{}, fmt.Errorf("%w: game has no word set", ErrValidation)
 	}
+	deck, err := s.store.ListGameCallDeck(ctx, gameRunID)
+	if err != nil {
+		return domain.CalledWord{}, mapStoreError(err)
+	}
+	if len(deck) > 0 {
+		calledWord, err := s.store.CreateCalledWordFromDeck(ctx, db.CreateCalledWordParams{
+			GameRunID:      gameRunID,
+			CalledByUserID: &user.ID,
+		})
+		if err != nil {
+			if errors.Is(err, db.ErrNotFound) {
+				return domain.CalledWord{}, fmt.Errorf("%w: locked call deck is exhausted", ErrConflict)
+			}
+			return domain.CalledWord{}, mapStoreError(err)
+		}
+		s.emit(ctx, events.Event{Type: "word.called", EntityID: calledWord.ID, Payload: calledWordPayload(gameRunID, calledWord)})
+		s.recordAudit(ctx, audit.Event{GameRunID: &gameRunID, ActorUserID: &user.ID, EventType: "word.called", EntityType: "called_word", EntityID: &calledWord.ID, Payload: map[string]any{"word": calledWord.Word, "sequence": calledWord.Sequence, "deck": true}})
+		return calledWord, nil
+	}
 
 	words, err := s.store.ListWordSetWords(ctx, *run.WordSetID)
 	if err != nil {
@@ -696,6 +749,702 @@ func (s *Service) ListAllowedPlayers(ctx context.Context, gameRunID string) ([]d
 	}
 
 	return s.store.ListAllowedPlayers(ctx, gameRunID)
+}
+
+type UpdateGameSettingsInput struct {
+	GameRunID                    string
+	MarkingMode                  *string
+	AllowPlayerMarkingModeChoice *bool
+	ShowClaimReadiness           *bool
+	VoiceClaimMode               *string
+	VoiceClaimAutoplay           *bool
+	CallerMode                   *string
+	ThemeMode                    *string
+	ThemeID                      *string
+}
+
+func (s *Service) GetGameSettings(ctx context.Context, principal auth.Principal, gameRunID string) (domain.GameRunSettings, error) {
+	if _, err := s.authorizeHostMutation(ctx, principal, gameRunID); err != nil {
+		return domain.GameRunSettings{}, err
+	}
+
+	settings, err := s.store.GetOrCreateGameSettings(ctx, gameRunID)
+	if err != nil {
+		return domain.GameRunSettings{}, mapStoreError(err)
+	}
+
+	return settings, nil
+}
+
+func (s *Service) UpdateGameSettings(ctx context.Context, principal auth.Principal, input UpdateGameSettingsInput) (domain.GameRunSettings, error) {
+	user, err := s.authorizeHostMutation(ctx, principal, input.GameRunID)
+	if err != nil {
+		return domain.GameRunSettings{}, err
+	}
+	if input.MarkingMode != nil {
+		markingMode, err := normalizeMarkingMode(*input.MarkingMode)
+		if err != nil {
+			return domain.GameRunSettings{}, err
+		}
+		input.MarkingMode = &markingMode
+	}
+	if input.VoiceClaimMode != nil {
+		voiceClaimMode, err := normalizeChoice(*input.VoiceClaimMode, "voiceClaimMode", []string{"off", "optional", "required"})
+		if err != nil {
+			return domain.GameRunSettings{}, err
+		}
+		input.VoiceClaimMode = &voiceClaimMode
+	}
+	if input.CallerMode != nil {
+		callerMode, err := normalizeChoice(*input.CallerMode, "callerMode", []string{"off", "text_only", "tts"})
+		if err != nil {
+			return domain.GameRunSettings{}, err
+		}
+		input.CallerMode = &callerMode
+	}
+	if input.ThemeMode != nil {
+		themeMode, err := normalizeChoice(*input.ThemeMode, "themeMode", []string{"default", "manual", "ai_generated"})
+		if err != nil {
+			return domain.GameRunSettings{}, err
+		}
+		input.ThemeMode = &themeMode
+	}
+	if input.ThemeID != nil {
+		themeID := strings.TrimSpace(*input.ThemeID)
+		if themeID == "" {
+			return domain.GameRunSettings{}, fmt.Errorf("%w: themeId cannot be blank", ErrValidation)
+		}
+		input.ThemeID = &themeID
+	}
+
+	settings, err := s.store.UpdateGameSettings(ctx, db.UpdateGameSettingsParams{
+		GameRunID:                    input.GameRunID,
+		MarkingMode:                  input.MarkingMode,
+		AllowPlayerMarkingModeChoice: input.AllowPlayerMarkingModeChoice,
+		ShowClaimReadiness:           input.ShowClaimReadiness,
+		VoiceClaimMode:               input.VoiceClaimMode,
+		VoiceClaimAutoplay:           input.VoiceClaimAutoplay,
+		CallerMode:                   input.CallerMode,
+		ThemeMode:                    input.ThemeMode,
+		ThemeID:                      input.ThemeID,
+		ActorUserID:                  &user.ID,
+	})
+	if err != nil {
+		return domain.GameRunSettings{}, mapStoreError(err)
+	}
+
+	s.emit(ctx, events.Event{Type: "game.settings_updated", EntityID: input.GameRunID, Payload: map[string]any{"gameRunId": input.GameRunID, "markingMode": settings.MarkingMode}})
+	return settings, nil
+}
+
+type UpdatePlayerPreferencesInput struct {
+	GameRunID   string
+	MarkingMode *string
+}
+
+func (s *Service) GetCurrentPlayerPreferences(ctx context.Context, principal auth.Principal, gameRunID string) (domain.PlayerPreferences, error) {
+	player, err := s.resolveCurrentPlayer(ctx, principal, gameRunID)
+	if err != nil {
+		return domain.PlayerPreferences{}, err
+	}
+
+	preferences, err := s.store.GetOrCreatePlayerPreferences(ctx, gameRunID, player.ID)
+	if err != nil {
+		return domain.PlayerPreferences{}, mapStoreError(err)
+	}
+
+	return preferences, nil
+}
+
+func (s *Service) UpdateCurrentPlayerPreferences(ctx context.Context, principal auth.Principal, input UpdatePlayerPreferencesInput) (domain.PlayerPreferences, error) {
+	user, err := s.store.UpsertUserFromPrincipal(ctx, principal)
+	if err != nil {
+		return domain.PlayerPreferences{}, err
+	}
+	player, err := s.resolveCurrentPlayer(ctx, principal, input.GameRunID)
+	if err != nil {
+		return domain.PlayerPreferences{}, err
+	}
+	if input.MarkingMode != nil {
+		markingMode, err := normalizeMarkingMode(*input.MarkingMode)
+		if err != nil {
+			return domain.PlayerPreferences{}, err
+		}
+		input.MarkingMode = &markingMode
+	}
+
+	preferences, err := s.store.UpdatePlayerPreferences(ctx, db.UpdatePlayerPreferencesParams{
+		GameRunID:   input.GameRunID,
+		PlayerID:    player.ID,
+		MarkingMode: input.MarkingMode,
+		ActorUserID: &user.ID,
+	})
+	if err != nil {
+		return domain.PlayerPreferences{}, mapStoreError(err)
+	}
+
+	s.emit(ctx, events.Event{Type: "player.preferences_updated", EntityID: player.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "playerId": player.ID, "markingMode": preferences.MarkingMode}})
+	return preferences, nil
+}
+
+func (s *Service) AutoMarkGame(ctx context.Context, principal auth.Principal, gameRunID string) (db.AutoMarkRunResult, error) {
+	if _, err := s.authorizeHostMutation(ctx, principal, gameRunID); err != nil {
+		return db.AutoMarkRunResult{}, err
+	}
+
+	result, err := s.store.AutoMarkGame(ctx, gameRunID)
+	if err != nil {
+		return db.AutoMarkRunResult{}, mapStoreError(err)
+	}
+	if result.CellsMarked > 0 {
+		s.emit(ctx, events.Event{Type: "card.auto_marked", EntityID: gameRunID, Payload: map[string]any{"gameRunId": gameRunID, "playersMarked": result.PlayersMarked, "cellsMarked": result.CellsMarked, "mode": result.Mode}})
+	}
+
+	return result, nil
+}
+
+type UpdateGeneratedContentInput struct {
+	GameRunID    string
+	Topic        *string
+	Summary      *string
+	Words        []string
+	CallerStyle  *string
+	HasWordPatch bool
+}
+
+func (s *Service) PrepareGameContent(ctx context.Context, gameRunID string) (domain.GeneratedGameContent, error) {
+	return s.prepareGameContent(ctx, gameRunID, nil)
+}
+
+func (s *Service) PrepareGameContentForHost(ctx context.Context, principal auth.Principal, gameRunID string) (domain.GeneratedGameContent, error) {
+	user, err := s.authorizeHostMutation(ctx, principal, gameRunID)
+	if err != nil {
+		return domain.GeneratedGameContent{}, err
+	}
+
+	return s.prepareGameContent(ctx, gameRunID, &user.ID)
+}
+
+func (s *Service) prepareGameContent(ctx context.Context, gameRunID string, actorUserID *string) (domain.GeneratedGameContent, error) {
+	run, err := s.store.GetGameRun(ctx, gameRunID)
+	if err != nil {
+		return domain.GeneratedGameContent{}, mapStoreError(err)
+	}
+	settings, err := s.store.GetOrCreateGameSettings(ctx, gameRunID)
+	if err != nil {
+		return domain.GeneratedGameContent{}, mapStoreError(err)
+	}
+
+	job, err := s.store.CreateContentGenerationJob(ctx, db.CreateContentGenerationJobParams{
+		GameRunID: gameRunID,
+		JobType:   "game_prep",
+		Status:    "running",
+		Provider:  "unknown",
+	})
+	if err != nil {
+		return domain.GeneratedGameContent{}, mapStoreError(err)
+	}
+
+	output, err := s.aiClient.GenerateGamePrep(ctx, ai.GamePrepInput{
+		GameRunID:   gameRunID,
+		TopicPrompt: run.Name,
+		WordCount:   75,
+		Tone:        "fun",
+		Audience:    "internal workplace team",
+		Settings: map[string]string{
+			"callerStyle": settings.CallerMode,
+			"themeMode":   settings.ThemeMode,
+		},
+	})
+	if err != nil {
+		message := err.Error()
+		_, _ = s.store.UpdateContentGenerationJob(ctx, db.UpdateContentGenerationJobParams{
+			JobID:        job.ID,
+			Status:       "failed",
+			ErrorMessage: &message,
+		})
+		return domain.GeneratedGameContent{}, fmt.Errorf("%w: AI game prep failed: %v", ErrValidation, err)
+	}
+
+	now := s.clock.Now()
+	reviewClosesAt := now.Add(30 * time.Minute)
+	if run.ScheduledStartAt != nil {
+		deadline := run.ScheduledStartAt.Add(-30 * time.Minute)
+		if deadline.After(now) {
+			reviewClosesAt = deadline
+		}
+	}
+	callerStyle := stringPtrIfNotBlank(output.CallerStyle)
+	themePrompt := stringPtrIfNotBlank(output.ThemePrompt)
+	content, err := s.store.UpsertGeneratedGameContent(ctx, db.UpsertGeneratedGameContentParams{
+		GameRunID:            gameRunID,
+		GenerationJobID:      &job.ID,
+		Status:               "generated",
+		Topic:                output.Topic,
+		Summary:              output.Summary,
+		GeneratedWords:       output.Words,
+		CurrentWords:         output.Words,
+		CallerStyle:          callerStyle,
+		ThemePrompt:          themePrompt,
+		ReviewWindowOpensAt:  &now,
+		ReviewWindowClosesAt: &reviewClosesAt,
+		GenerationProvider:   output.Provider,
+		ActorUserID:          actorUserID,
+	})
+	if err != nil {
+		return domain.GeneratedGameContent{}, mapStoreError(err)
+	}
+
+	s.emit(ctx, events.Event{Type: "content.generated", EntityID: content.ID, Payload: map[string]any{"gameRunId": gameRunID, "wordCount": len(content.CurrentWords)}})
+	return content, nil
+}
+
+func (s *Service) GetGeneratedGameContent(ctx context.Context, principal auth.Principal, gameRunID string) (domain.GeneratedGameContent, error) {
+	if _, err := s.authorizeHostMutation(ctx, principal, gameRunID); err != nil {
+		return domain.GeneratedGameContent{}, err
+	}
+	content, err := s.store.GetGeneratedGameContent(ctx, gameRunID)
+	if err != nil {
+		return domain.GeneratedGameContent{}, mapStoreError(err)
+	}
+
+	return content, nil
+}
+
+func (s *Service) UpdateGeneratedGameContent(ctx context.Context, principal auth.Principal, input UpdateGeneratedContentInput) (domain.GeneratedGameContent, error) {
+	user, err := s.authorizeHostMutation(ctx, principal, input.GameRunID)
+	if err != nil {
+		return domain.GeneratedGameContent{}, err
+	}
+	if input.Topic != nil {
+		topic := strings.TrimSpace(*input.Topic)
+		if topic == "" {
+			return domain.GeneratedGameContent{}, fmt.Errorf("%w: topic cannot be blank", ErrValidation)
+		}
+		input.Topic = &topic
+	}
+	if input.Summary != nil {
+		summary := strings.TrimSpace(*input.Summary)
+		if summary == "" {
+			return domain.GeneratedGameContent{}, fmt.Errorf("%w: summary cannot be blank", ErrValidation)
+		}
+		input.Summary = &summary
+	}
+	if input.CallerStyle != nil {
+		callerStyle := strings.TrimSpace(*input.CallerStyle)
+		if callerStyle == "" {
+			return domain.GeneratedGameContent{}, fmt.Errorf("%w: callerStyle cannot be blank", ErrValidation)
+		}
+		input.CallerStyle = &callerStyle
+	}
+	if input.HasWordPatch {
+		words, err := normalizeContentWords(input.Words)
+		if err != nil {
+			return domain.GeneratedGameContent{}, err
+		}
+		input.Words = words
+	}
+
+	content, err := s.store.UpdateGeneratedGameContent(ctx, db.UpdateGeneratedGameContentParams{
+		GameRunID:    input.GameRunID,
+		Topic:        input.Topic,
+		Summary:      input.Summary,
+		Words:        input.Words,
+		CallerStyle:  input.CallerStyle,
+		ActorUserID:  &user.ID,
+		HasWordPatch: input.HasWordPatch,
+	})
+	if err != nil {
+		if errors.Is(err, db.ErrConflict) {
+			return domain.GeneratedGameContent{}, fmt.Errorf("%w: generated content is locked and cannot be edited", ErrConflict)
+		}
+		return domain.GeneratedGameContent{}, mapStoreError(err)
+	}
+
+	s.emit(ctx, events.Event{Type: "content.edited", EntityID: content.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "wordCount": len(content.CurrentWords)}})
+	return content, nil
+}
+
+func (s *Service) LockGameContent(ctx context.Context, gameRunID string) (domain.GeneratedGameContent, error) {
+	content, _, err := s.lockGameContent(ctx, gameRunID, nil)
+	return content, err
+}
+
+func (s *Service) LockGameContentForHost(ctx context.Context, principal auth.Principal, gameRunID string) (domain.GeneratedGameContent, error) {
+	user, err := s.authorizeHostMutation(ctx, principal, gameRunID)
+	if err != nil {
+		return domain.GeneratedGameContent{}, err
+	}
+	content, _, err := s.lockGameContent(ctx, gameRunID, &user.ID)
+	return content, err
+}
+
+func (s *Service) lockGameContent(ctx context.Context, gameRunID string, actorUserID *string) (domain.GeneratedGameContent, *domain.WordSetWithWords, error) {
+	content, err := s.store.GetGeneratedGameContent(ctx, gameRunID)
+	if err != nil {
+		return domain.GeneratedGameContent{}, nil, mapStoreError(err)
+	}
+	if _, err := ai.NormalizeGamePrepOutput(ai.GamePrepOutput{
+		Topic:   content.Topic,
+		Summary: content.Summary,
+		Words:   content.CurrentWords,
+	}); err != nil {
+		return domain.GeneratedGameContent{}, nil, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+
+	result, err := s.store.LockGeneratedGameContent(ctx, db.LockGeneratedGameContentParams{
+		GameRunID:   gameRunID,
+		ActorUserID: actorUserID,
+	})
+	if err != nil {
+		return domain.GeneratedGameContent{}, nil, mapStoreError(err)
+	}
+	if len(result.WordSet.Words) > 0 {
+		seed := "game:" + gameRunID + ":content:" + result.Content.ID
+		deckWords := BuildCallDeck(result.WordSet.Words, seed, CallDeckShuffleVersion)
+		if _, err := s.store.CreateGameCallDeck(ctx, db.CreateGameCallDeckParams{
+			GameRunID:      gameRunID,
+			ShuffleSeed:    seed,
+			ShuffleVersion: CallDeckShuffleVersion,
+			Words:          deckWords,
+		}); err != nil {
+			return domain.GeneratedGameContent{}, nil, mapStoreError(err)
+		}
+	}
+
+	s.emit(ctx, events.Event{Type: "content.locked", EntityID: result.Content.ID, Payload: map[string]any{"gameRunId": gameRunID, "wordSetId": result.Content.LockedWordSetID, "wordCount": len(result.Content.CurrentWords)}})
+	return result.Content, &result.WordSet, nil
+}
+
+func (s *Service) GenerateCallerAssets(ctx context.Context, principal auth.Principal, gameRunID string) ([]domain.CallerAsset, error) {
+	if _, err := s.authorizeHostMutation(ctx, principal, gameRunID); err != nil {
+		return nil, err
+	}
+	deck, err := s.store.ListGameCallDeck(ctx, gameRunID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	if len(deck) == 0 {
+		return nil, fmt.Errorf("%w: locked call deck is required before caller assets can be generated", ErrConflict)
+	}
+	s.emit(ctx, events.Event{Type: "caller.assets_generation_started", EntityID: gameRunID, Payload: map[string]any{"gameRunId": gameRunID, "items": len(deck)}})
+	inputDeck := make([]ai.CallDeckItemInput, 0, len(deck))
+	for _, item := range deck {
+		inputDeck = append(inputDeck, ai.CallDeckItemInput{CallDeckItemID: item.ID, Word: item.Word, Sequence: item.Sequence})
+	}
+	output, err := s.aiClient.GenerateCallerAssetsBulk(ctx, ai.CallerAssetsBulkInput{
+		GameRunID: gameRunID,
+		VoiceName: "local-default",
+		Tone:      "fun",
+		Deck:      inputDeck,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: caller asset generation failed: %v", ErrValidation, err)
+	}
+	byDeckID := make(map[string]ai.CallerAssetOutput, len(output.Assets))
+	for _, asset := range output.Assets {
+		byDeckID[asset.CallDeckItemID] = asset
+	}
+	assets := make([]domain.CallerAsset, 0, len(deck))
+	for _, item := range deck {
+		assetOut, ok := byDeckID[item.ID]
+		if !ok {
+			assetOut = ai.CallerAssetOutput{CallDeckItemID: item.ID, Word: item.Word, Sequence: item.Sequence, Line: "Next word is " + item.Word + ".", Status: "fallback", Provider: output.Provider, ErrorReason: "missing_from_ai_response"}
+		}
+		status := normalizeCallerAssetStatus(assetOut.Status)
+		errorReason := stringPtrIfNotBlank(assetOut.ErrorReason)
+		if status == "failed" && assetOut.Line == "" {
+			assetOut.Line = "Next word is " + item.Word + "."
+		}
+		audioURL := stringPtrIfNotBlank(assetOut.AudioURL)
+		storageKey := stringPtrIfNotBlank(assetOut.StorageKey)
+		voiceName := stringPtrIfNotBlank("local-default")
+		asset, err := s.store.UpsertCallerAsset(ctx, db.CreateCallerAssetParams{
+			GameRunID:      gameRunID,
+			CallDeckItemID: item.ID,
+			Word:           item.Word,
+			Sequence:       item.Sequence,
+			Line:           firstNonBlank(assetOut.Line, "Next word is "+item.Word+"."),
+			AudioURL:       audioURL,
+			StorageKey:     storageKey,
+			VoiceName:      voiceName,
+			Provider:       firstNonBlank(assetOut.Provider, output.Provider),
+			Status:         status,
+			ErrorReason:    errorReason,
+		})
+		if err != nil {
+			return nil, mapStoreError(err)
+		}
+		eventType := "caller.audio_ready"
+		if asset.Status == "failed" || asset.Status == "fallback" {
+			eventType = "caller.failed"
+		}
+		s.emit(ctx, events.Event{Type: eventType, EntityID: asset.ID, Payload: map[string]any{"gameRunId": gameRunID, "word": asset.Word, "sequence": asset.Sequence, "status": asset.Status}})
+		assets = append(assets, asset)
+	}
+	return assets, nil
+}
+
+func (s *Service) SendMockPlayerInvites(ctx context.Context, principal auth.Principal, gameRunID string) ([]domain.DeliveryAttempt, error) {
+	if _, err := s.authorizeHostMutation(ctx, principal, gameRunID); err != nil {
+		return nil, err
+	}
+	run, err := s.store.GetGameRun(ctx, gameRunID)
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	allowed, err := s.store.ListAllowedPlayers(ctx, gameRunID)
+	if err != nil {
+		return nil, err
+	}
+	attempts := make([]db.CreateDeliveryAttemptParams, 0, len(allowed))
+	for _, player := range allowed {
+		link := "/join?code=" + run.Code
+		attempts = append(attempts, db.CreateDeliveryAttemptParams{
+			RecipientEmail: player.Email,
+			Subject:        "You're invited to " + run.Name,
+			TemplateKey:    "local.player_invite",
+			BodyPreview:    "Join " + run.Name + " with code " + run.Code + ".",
+			LinkURL:        link,
+			GameCode:       run.Code,
+			Status:         "sent",
+		})
+	}
+	_, created, err := s.store.CreateDeliveryBatch(ctx, db.CreateDeliveryBatchParams{GameRunID: gameRunID, Channel: "email", Purpose: "player_invite", Attempts: attempts})
+	if err != nil {
+		return nil, mapStoreError(err)
+	}
+	return created, nil
+}
+
+func (s *Service) ListDeliveries(ctx context.Context, principal auth.Principal, gameRunID string) ([]domain.DeliveryAttempt, error) {
+	if _, err := s.authorizeHostMutation(ctx, principal, gameRunID); err != nil {
+		return nil, err
+	}
+	return s.store.ListDeliveryAttempts(ctx, gameRunID)
+}
+
+func (s *Service) RetryDelivery(ctx context.Context, principal auth.Principal, deliveryID string) (domain.DeliveryAttempt, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return domain.DeliveryAttempt{}, ErrForbidden
+	}
+	attempt, err := s.store.RetryDeliveryAttempt(ctx, deliveryID)
+	if err != nil {
+		return domain.DeliveryAttempt{}, mapStoreError(err)
+	}
+	return attempt, nil
+}
+
+func (s *Service) OpenLobby(ctx context.Context, principal auth.Principal, gameRunID string) (GameRunWithCounts, error) {
+	return s.transitionGame(ctx, principal, gameRunID, gameTransition{
+		Status:        "lobby_open",
+		EventType:     "lobby.opened",
+		AllowedFrom:   []string{"draft", "scheduled", "invites_sent"},
+		ErrorTemplate: "lobby cannot open from current status",
+	})
+}
+
+type UpdatePlayerProfileInput struct {
+	GameRunID   string
+	Icon        string
+	AvatarColor string
+	AvatarLabel string
+}
+
+func (s *Service) UpdateCurrentPlayerProfile(ctx context.Context, principal auth.Principal, input UpdatePlayerProfileInput) (domain.Player, error) {
+	player, err := s.resolveCurrentPlayer(ctx, principal, input.GameRunID)
+	if err != nil {
+		return domain.Player{}, err
+	}
+	icon, color, label, err := normalizePlayerProfile(input.Icon, input.AvatarColor, input.AvatarLabel)
+	if err != nil {
+		return domain.Player{}, err
+	}
+	updated, err := s.store.UpdatePlayerProfile(ctx, db.UpdatePlayerProfileParams{
+		GameRunID: input.GameRunID, PlayerID: player.ID, Icon: icon, AvatarColor: color, AvatarLabel: label,
+	})
+	if err != nil {
+		return domain.Player{}, mapStoreError(err)
+	}
+	s.emit(ctx, events.Event{Type: "player.profile_updated", EntityID: updated.ID, Payload: map[string]any{"gameRunId": input.GameRunID, "playerId": updated.ID}})
+	return updated, nil
+}
+
+type GenerateThemeInput struct {
+	GameRunID *string
+	Prompt    string
+	Tone      string
+}
+
+func (s *Service) GenerateTheme(ctx context.Context, principal auth.Principal, input GenerateThemeInput) (domain.Theme, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return domain.Theme{}, ErrForbidden
+	}
+	user, err := s.store.UpsertUserFromPrincipal(ctx, principal)
+	if err != nil {
+		return domain.Theme{}, err
+	}
+	prompt := strings.TrimSpace(input.Prompt)
+	if prompt == "" {
+		return domain.Theme{}, fmt.Errorf("%w: prompt is required", ErrValidation)
+	}
+	if input.GameRunID != nil {
+		if _, err := s.authorizeHostMutation(ctx, principal, *input.GameRunID); err != nil {
+			return domain.Theme{}, err
+		}
+	}
+	job, err := s.store.CreateThemeGenerationJob(ctx, input.GameRunID, prompt, "unknown")
+	if err != nil {
+		return domain.Theme{}, mapStoreError(err)
+	}
+	output, err := s.aiClient.GenerateTheme(ctx, ai.ThemeInput{GameRunID: stringValue(input.GameRunID), Prompt: prompt, Tone: input.Tone, AllowedAssets: ThemeAssetIDs()})
+	if err != nil {
+		return domain.Theme{}, fmt.Errorf("%w: theme generation failed: %v", ErrValidation, err)
+	}
+	tokens := domain.ThemeTokens{Name: output.Name, Summary: output.Summary, Palette: output.Palette, Icons: output.Icons, Decorations: output.Decorations, Motion: output.Motion, CallerTone: output.CallerTone, Accessibility: output.Accessibility}
+	if err := validateThemeTokens(tokens); err != nil {
+		return domain.Theme{}, err
+	}
+	theme, err := s.store.CreateTheme(ctx, db.CreateThemeParams{GameRunID: input.GameRunID, GenerationJobID: &job.ID, Name: output.Name, Summary: output.Summary, Tokens: tokens, Provider: output.Provider, CreatedByUserID: &user.ID})
+	if err != nil {
+		return domain.Theme{}, mapStoreError(err)
+	}
+	s.emit(ctx, events.Event{Type: "theme.generated", EntityID: theme.ID, Payload: map[string]any{"themeId": theme.ID, "name": theme.Name}})
+	return theme, nil
+}
+
+func (s *Service) GetTheme(ctx context.Context, principal auth.Principal, themeID string) (domain.Theme, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return domain.Theme{}, ErrForbidden
+	}
+	return s.store.GetTheme(ctx, themeID)
+}
+
+func (s *Service) UpdateTheme(ctx context.Context, principal auth.Principal, themeID string, tokens domain.ThemeTokens, name, summary *string) (domain.Theme, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return domain.Theme{}, ErrForbidden
+	}
+	if name != nil {
+		trimmed := strings.TrimSpace(*name)
+		if trimmed == "" {
+			return domain.Theme{}, fmt.Errorf("%w: name cannot be blank", ErrValidation)
+		}
+		name = &trimmed
+		tokens.Name = trimmed
+	}
+	if summary != nil {
+		trimmed := strings.TrimSpace(*summary)
+		if trimmed == "" {
+			return domain.Theme{}, fmt.Errorf("%w: summary cannot be blank", ErrValidation)
+		}
+		summary = &trimmed
+		tokens.Summary = trimmed
+	}
+	if err := validateThemeTokens(tokens); err != nil {
+		return domain.Theme{}, err
+	}
+	theme, err := s.store.UpdateTheme(ctx, themeID, tokens, name, summary)
+	if err != nil {
+		return domain.Theme{}, mapStoreError(err)
+	}
+	return theme, nil
+}
+
+func (s *Service) SetThemeApproval(ctx context.Context, principal auth.Principal, themeID string, approved bool) (domain.Theme, error) {
+	if !auth.HasRole(principal, "admin", "host") {
+		return domain.Theme{}, ErrForbidden
+	}
+	user, err := s.store.UpsertUserFromPrincipal(ctx, principal)
+	if err != nil {
+		return domain.Theme{}, err
+	}
+	theme, err := s.store.SetThemeApproval(ctx, themeID, &user.ID, approved)
+	if err != nil {
+		return domain.Theme{}, mapStoreError(err)
+	}
+	eventType := "theme.approved"
+	if !approved {
+		eventType = "theme.rejected"
+	}
+	s.emit(ctx, events.Event{Type: eventType, EntityID: theme.ID, Payload: map[string]any{"themeId": theme.ID, "status": theme.Status}})
+	return theme, nil
+}
+
+func (s *Service) ApplyThemeToGame(ctx context.Context, principal auth.Principal, gameRunID, themeID string) (domain.GameRunSettings, error) {
+	user, err := s.authorizeHostMutation(ctx, principal, gameRunID)
+	if err != nil {
+		return domain.GameRunSettings{}, err
+	}
+	settings, err := s.store.ApplyThemeToGame(ctx, gameRunID, themeID, &user.ID)
+	if err != nil {
+		return domain.GameRunSettings{}, mapStoreError(err)
+	}
+	s.emit(ctx, events.Event{Type: "theme.applied", EntityID: themeID, Payload: map[string]any{"gameRunId": gameRunID, "themeId": themeID}})
+	return settings, nil
+}
+
+func (s *Service) GetCurrentPlayerClaimReadiness(ctx context.Context, principal auth.Principal, gameRunID string) (domain.ClaimReadiness, error) {
+	run, err := s.store.GetGameRun(ctx, gameRunID)
+	if err != nil {
+		return domain.ClaimReadiness{}, mapStoreError(err)
+	}
+	player, err := s.resolveCurrentPlayer(ctx, principal, gameRunID)
+	if err != nil {
+		return domain.ClaimReadiness{}, err
+	}
+	card, err := s.store.GetPlayerCard(ctx, player.ID)
+	if err != nil {
+		return domain.ClaimReadiness{}, mapStoreError(err)
+	}
+	if card.GameRunID != gameRunID {
+		return domain.ClaimReadiness{}, ErrNotFound
+	}
+	calledWords, err := s.store.ListCalledWords(ctx, gameRunID)
+	if err != nil {
+		return domain.ClaimReadiness{}, err
+	}
+
+	supportedPatterns := []string{winningPatternOrDefault(run)}
+	cellByID := make(map[string]domain.BingoCardCell, len(card.Cells))
+	for _, cell := range card.Cells {
+		cellByID[cell.ID] = cell
+	}
+
+	readiness := domain.ClaimReadiness{
+		SupportedPatterns: supportedPatterns,
+		ReadyPatterns:     []string{},
+		MatchedCells:      []domain.BingoCardCell{},
+		MissingCells:      []domain.BingoCardCell{},
+		Reason:            "not_ready",
+	}
+	bestMissingCount := 26
+	for _, pattern := range supportedPatterns {
+		validation := bingo.Validate(bingo.ValidationInput{
+			GameRunID:       gameRunID,
+			ClaimGameRunID:  run.ID,
+			PlayerGameRunID: player.GameRunID,
+			CardGameRunID:   card.GameRunID,
+			Pattern:         pattern,
+			Cells:           bingoCellsFromDomain(card.Cells),
+			CalledWords:     calledWordStrings(calledWords),
+		})
+		if validation.Valid {
+			readiness.Ready = true
+			readiness.ReadyPatterns = append(readiness.ReadyPatterns, pattern)
+		}
+		if validation.Valid || len(validation.MissingCells) < bestMissingCount {
+			bestMissingCount = len(validation.MissingCells)
+			readiness.BestPattern = pattern
+			readiness.MatchedCells = domainCellsFromBingo(validation.MatchedCells, cellByID)
+			readiness.MissingCells = domainCellsFromBingo(validation.MissingCells, cellByID)
+			readiness.Reason = validation.Reason
+		}
+	}
+	if readiness.Ready && readiness.Reason == "" {
+		readiness.Reason = "ready_to_claim"
+	}
+
+	return readiness, nil
 }
 
 func (s *Service) ListWordSets(ctx context.Context, principal auth.Principal) ([]domain.WordSetWithWords, error) {
@@ -1268,17 +2017,25 @@ func (s *Service) GetHostSnapshot(ctx context.Context, principal auth.Principal,
 	if err != nil {
 		return domain.HostSnapshot{}, err
 	}
+	settings, err := s.store.GetOrCreateGameSettings(ctx, gameRunID)
+	if err != nil {
+		return domain.HostSnapshot{}, mapStoreError(err)
+	}
+	currentAsset, theme := s.snapshotExtras(ctx, gameRunID, settings, summary.CurrentWord)
 
 	return domain.HostSnapshot{
-		GameRun:     summary.GameRun,
-		Status:      summary.Status,
-		CurrentWord: summary.CurrentWord,
-		Pattern:     winningPatternOrDefault(summary.GameRun),
-		PlayerCount: summary.PlayerCount,
-		Players:     summary.Players,
-		CalledWords: summary.CalledWords,
-		Claims:      summary.Claims,
-		Winners:     summary.Winners,
+		GameRun:            summary.GameRun,
+		Settings:           settings,
+		Status:             summary.Status,
+		CurrentWord:        summary.CurrentWord,
+		CurrentCallerAsset: currentAsset,
+		AppliedTheme:       theme,
+		Pattern:            winningPatternOrDefault(summary.GameRun),
+		PlayerCount:        summary.PlayerCount,
+		Players:            summary.Players,
+		CalledWords:        summary.CalledWords,
+		Claims:             summary.Claims,
+		Winners:            summary.Winners,
 	}, nil
 }
 
@@ -1346,24 +2103,37 @@ func (s *Service) GetPlayerSnapshot(ctx context.Context, principal auth.Principa
 	if err != nil {
 		return domain.PlayerSnapshot{}, err
 	}
+	settings, err := s.store.GetOrCreateGameSettings(ctx, gameRunID)
+	if err != nil {
+		return domain.PlayerSnapshot{}, mapStoreError(err)
+	}
+	markingMode, err := s.store.GetEffectivePlayerMarkingMode(ctx, gameRunID, playerID)
+	if err != nil {
+		return domain.PlayerSnapshot{}, mapStoreError(err)
+	}
 
 	var currentWord *domain.CalledWord
 	if len(calledWords) > 0 {
 		word := calledWords[len(calledWords)-1]
 		currentWord = &word
 	}
+	currentAsset, theme := s.snapshotExtras(ctx, gameRunID, settings, currentWord)
 
 	return domain.PlayerSnapshot{
-		GameRun:         run,
-		Status:          run.Status,
-		CurrentWord:     currentWord,
-		Pattern:         winningPatternOrDefault(run),
-		Player:          player,
-		Card:            cardPtr,
-		CalledWords:     calledWords,
-		Claims:          playerClaims,
-		Winners:         winners,
-		ReconnectNotice: notice,
+		GameRun:            run,
+		Settings:           settings,
+		MarkingMode:        markingMode,
+		Status:             run.Status,
+		CurrentWord:        currentWord,
+		CurrentCallerAsset: currentAsset,
+		AppliedTheme:       theme,
+		Pattern:            winningPatternOrDefault(run),
+		Player:             player,
+		Card:               cardPtr,
+		CalledWords:        calledWords,
+		Claims:             playerClaims,
+		Winners:            winners,
+		ReconnectNotice:    notice,
 	}, nil
 }
 
@@ -1547,6 +2317,109 @@ func normalizeWordInputs(wordSetID string, inputs []WordSetWordInput) ([]db.Crea
 	return words, nil
 }
 
+func normalizeContentWords(inputs []string) ([]string, error) {
+	output, err := ai.NormalizeGamePrepOutput(ai.GamePrepOutput{
+		Topic:   "content validation",
+		Summary: "content validation",
+		Words:   inputs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrValidation, err)
+	}
+
+	return output.Words, nil
+}
+
+func normalizeCallerAssetStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "ready", "failed", "fallback", "pending":
+		return strings.ToLower(strings.TrimSpace(status))
+	default:
+		return "fallback"
+	}
+}
+
+func firstNonBlank(values ...string) string {
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func stringPtrIfNotBlank(value string) *string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil
+	}
+
+	return &value
+}
+
+func stringValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
+}
+
+func normalizePlayerProfile(icon, color, label string) (string, string, string, error) {
+	icon = strings.ToLower(strings.TrimSpace(icon))
+	color = strings.ToUpper(strings.TrimSpace(color))
+	label = strings.TrimSpace(label)
+	allowedIcons := map[string]struct{}{"star": {}, "sparkles": {}, "briefcase": {}, "rocket": {}, "trophy": {}, "coffee": {}, "smile": {}, "bolt": {}}
+	if _, ok := allowedIcons[icon]; !ok {
+		return "", "", "", fmt.Errorf("%w: icon must be one of star, sparkles, briefcase, rocket, trophy, coffee, smile, bolt", ErrValidation)
+	}
+	if len(color) != 7 || color[0] != '#' {
+		return "", "", "", fmt.Errorf("%w: avatarColor must be a hex color like #1F7A8C", ErrValidation)
+	}
+	for _, r := range color[1:] {
+		if (r < '0' || r > '9') && (r < 'A' || r > 'F') {
+			return "", "", "", fmt.Errorf("%w: avatarColor must be a hex color like #1F7A8C", ErrValidation)
+		}
+	}
+	if label == "" || len(label) > 4 {
+		return "", "", "", fmt.Errorf("%w: avatarLabel must be 1 to 4 characters", ErrValidation)
+	}
+	return icon, color, label, nil
+}
+
+func ThemeAssetIDs() []string {
+	return []string{"sparkles", "briefcase", "rocket", "trophy", "coffee", "star", "confetti", "subtle", "none"}
+}
+
+func validateThemeTokens(tokens domain.ThemeTokens) error {
+	if strings.TrimSpace(tokens.Name) == "" || strings.TrimSpace(tokens.Summary) == "" {
+		return fmt.Errorf("%w: theme name and summary are required", ErrValidation)
+	}
+	if len(tokens.Palette) == 0 {
+		return fmt.Errorf("%w: theme palette is required", ErrValidation)
+	}
+	allowed := make(map[string]struct{})
+	for _, id := range ThemeAssetIDs() {
+		allowed[id] = struct{}{}
+	}
+	for _, icon := range tokens.Icons {
+		if _, ok := allowed[strings.ToLower(strings.TrimSpace(icon))]; !ok {
+			return fmt.Errorf("%w: theme icon %q is not approved", ErrValidation, icon)
+		}
+	}
+	for _, decoration := range tokens.Decorations {
+		if _, ok := allowed[strings.ToLower(strings.TrimSpace(decoration))]; !ok {
+			return fmt.Errorf("%w: theme decoration %q is not approved", ErrValidation, decoration)
+		}
+	}
+	payload, _ := json.Marshal(tokens)
+	value := strings.ToLower(string(payload))
+	if strings.Contains(value, "<script") || strings.Contains(value, "javascript:") || strings.Contains(value, "http://") || strings.Contains(value, "https://") || strings.Contains(value, "url(") {
+		return fmt.Errorf("%w: theme tokens cannot include scripts or external asset URLs", ErrValidation)
+	}
+	return nil
+}
+
 func (s *Service) reconnectNotice(ctx context.Context, gameRunID string, player domain.Player, reconnected bool) (*domain.ReconnectNotice, error) {
 	if !reconnected {
 		return nil, nil
@@ -1581,6 +2454,40 @@ func reconnectPayload(gameRunID, playerID, connectionState string, notice *domai
 	}
 
 	return payload
+}
+
+func calledWordPayload(gameRunID string, calledWord domain.CalledWord) map[string]any {
+	payload := map[string]any{"gameRunId": gameRunID, "word": calledWord.Word, "sequence": calledWord.Sequence}
+	if calledWord.CallerAsset != nil {
+		payload["callerAssetStatus"] = calledWord.CallerAsset.Status
+		payload["callerLine"] = calledWord.CallerAsset.Line
+		payload["callerAudioUrl"] = calledWord.CallerAsset.AudioURL
+	}
+	return payload
+}
+
+func (s *Service) snapshotExtras(ctx context.Context, gameRunID string, settings domain.GameRunSettings, currentWord *domain.CalledWord) (*domain.CallerAsset, *domain.Theme) {
+	var currentAsset *domain.CallerAsset
+	if currentWord != nil {
+		assets, err := s.store.ListCallerAssets(ctx, gameRunID)
+		if err == nil {
+			for _, asset := range assets {
+				if asset.Sequence == currentWord.Sequence {
+					copy := asset
+					currentAsset = &copy
+					break
+				}
+			}
+		}
+	}
+	var theme *domain.Theme
+	if settings.ThemeID != nil {
+		found, err := s.store.GetTheme(ctx, *settings.ThemeID)
+		if err == nil {
+			theme = &found
+		}
+	}
+	return currentAsset, theme
 }
 
 func makeCardCells(seed string, words []domain.WordSetWord) []db.CreateCardCellParams {
@@ -1645,10 +2552,44 @@ func winningPatternOrDefault(run domain.GameRun) string {
 	return bingo.NormalizePattern(*run.WinningPattern)
 }
 
+func normalizeMarkingMode(value string) (string, error) {
+	return normalizeChoice(value, "markingMode", []string{"manual", "assist", "auto_mark"})
+}
+
+func normalizeChoice(value, field string, allowed []string) (string, error) {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	for _, candidate := range allowed {
+		if normalized == candidate {
+			return normalized, nil
+		}
+	}
+
+	return "", fmt.Errorf("%w: %s must be one of %s", ErrValidation, field, strings.Join(allowed, ", "))
+}
+
 func bingoCellsFromDomain(cells []domain.BingoCardCell) []bingo.Cell {
 	result := make([]bingo.Cell, 0, len(cells))
 	for _, cell := range cells {
 		result = append(result, bingo.Cell{
+			ID:          cell.ID,
+			RowIndex:    cell.RowIndex,
+			ColIndex:    cell.ColIndex,
+			Word:        cell.Word,
+			IsFreeSpace: cell.IsFreeSpace,
+		})
+	}
+
+	return result
+}
+
+func domainCellsFromBingo(cells []bingo.Cell, byID map[string]domain.BingoCardCell) []domain.BingoCardCell {
+	result := make([]domain.BingoCardCell, 0, len(cells))
+	for _, cell := range cells {
+		if domainCell, ok := byID[cell.ID]; ok {
+			result = append(result, domainCell)
+			continue
+		}
+		result = append(result, domain.BingoCardCell{
 			ID:          cell.ID,
 			RowIndex:    cell.RowIndex,
 			ColIndex:    cell.ColIndex,
