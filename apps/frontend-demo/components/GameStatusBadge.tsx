@@ -1,27 +1,45 @@
-import { cn } from "@/lib/utils"
-import { GameState } from "@/types/game"
+import { GameState } from '@/types/game'
 
 interface GameStatusBadgeProps {
   status: GameState
-  className?: string
+  size?: 'sm' | 'md'
 }
 
-export function GameStatusBadge({ status, className }: GameStatusBadgeProps) {
+const STATUS_CONFIG: Record<GameState, { bg: string; text: string; dot: string; label: string; pulse: boolean }> = {
+  'Waiting': {
+    bg: '#FEF3C7', text: '#B45309', dot: '#F59E0B', label: 'Waiting', pulse: false,
+  },
+  'Starting Soon': {
+    bg: '#FEF3C7', text: '#D97706', dot: '#F59E0B', label: 'Starting Soon', pulse: true,
+  },
+  'Live': {
+    bg: '#EDFAF5', text: '#116B3F', dot: '#22AA6A', label: 'Live', pulse: true,
+  },
+  'Paused': {
+    bg: '#FEF3C7', text: '#D97706', dot: '#F59E0B', label: 'Paused', pulse: false,
+  },
+  'Finished': {
+    bg: '#F4F2EF', text: '#78716C', dot: '#A8A29E', label: 'Finished', pulse: false,
+  },
+}
+
+export function GameStatusBadge({ status, size = 'md' }: GameStatusBadgeProps) {
+  const config = STATUS_CONFIG[status]
+  const padding = size === 'sm' ? 'px-2.5 py-1' : 'px-4 py-1.5'
+  const textSize = size === 'sm' ? 'text-[10px]' : 'text-xs'
+
   return (
     <span
-      className={cn(
-        "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border",
-        status === 'Live' && "bg-brand-50 text-brand-700 border-brand-200",
-        status === 'Waiting' && "bg-gray-100 text-gray-800 border-gray-200",
-        status === 'Starting Soon' && "bg-blue-50 text-blue-700 border-blue-200",
-        status === 'Paused' && "bg-amber-50 text-amber-700 border-amber-200",
-        status === 'Finished' && "bg-green-50 text-green-700 border-green-200",
-        className
-      )}
+      className={`inline-flex items-center gap-1.5 ${padding} ${textSize} rounded-full font-extrabold uppercase tracking-wider`}
+      style={{ background: config.bg, color: config.text }}
+      role="status"
+      aria-label={`Game status: ${config.label}`}
     >
-      {status === 'Live' && <span className="w-1.5 h-1.5 mr-1.5 bg-brand-600 rounded-full animate-pulse" />}
-      {status === 'Paused' && <span className="w-1.5 h-1.5 mr-1.5 bg-amber-500 rounded-full" />}
-      {status}
+      <span
+        className={`w-1.5 h-1.5 rounded-full shrink-0 ${config.pulse ? 'animate-pulse' : ''}`}
+        style={{ background: config.dot }}
+      />
+      {config.label}
     </span>
   )
 }

@@ -14,6 +14,7 @@ export interface BingoCellData {
   id: string;
   word: string;
   isMarked: boolean;
+  isFreeSpace?: boolean;
 }
 
 export interface LeaderboardEntry {

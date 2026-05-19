@@ -1,38 +1,79 @@
-import { ActivityEvent } from "@/types/game"
+import { ActivityEvent } from '@/types/game'
+import { Activity } from 'lucide-react'
 
 interface ActivityFeedProps {
   events: ActivityEvent[]
 }
 
-const toneClass: Record<NonNullable<ActivityEvent["tone"]>, string> = {
-  neutral: "bg-slate-400",
-  success: "bg-emerald-500",
-  warning: "bg-amber-500",
-  danger: "bg-rose-500",
+const TONE_STYLES: Record<string, { dot: string; bg: string; text: string }> = {
+  success: { dot: '#22AA6A', bg: '#EDFAF5', text: '#116B3F' },
+  warning: { dot: '#F59E0B', bg: '#FEF3C7', text: '#B45309' },
+  danger:  { dot: '#F43F5E', bg: '#FFF1F2', text: '#BE123C' },
+  neutral: { dot: '#A8A29E', bg: '#F4F2EF', text: '#57534E' },
+}
+
+function timeAgo(isoString: string): string {
+  const diff = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000)
+  if (diff < 60) return `${diff}s ago`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  return `${Math.floor(diff / 3600)}h ago`
 }
 
 export function ActivityFeed({ events }: ActivityFeedProps) {
+  const reversed = [...events].reverse()
+
   return (
-    <section className="bg-white rounded-lg border border-slate-200 shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b border-slate-200 bg-slate-50">
-        <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Activity Log</h3>
+    <div
+      className="rounded-3xl p-5 flex flex-col"
+      style={{
+        background: '#FFFFFF',
+        border: '1.5px solid #F0EDE8',
+        boxShadow: '0 2px 16px rgba(0,0,0,0.04)',
+      }}
+    >
+      <div className="flex items-center gap-2 mb-4">
+        <Activity className="w-4 h-4" style={{ color: '#A8A29E' }} />
+        <span className="text-xs font-extrabold uppercase tracking-widest" style={{ color: '#A8A29E' }}>
+          Activity Log
+        </span>
       </div>
-      <ol className="divide-y divide-slate-100">
-        {events.map((event) => (
-          <li key={event.id} className="px-5 py-4 flex gap-3">
-            <span className={`mt-1.5 h-2.5 w-2.5 rounded-full ${toneClass[event.tone ?? "neutral"]}`} />
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="text-sm font-bold text-slate-800">{event.label}</p>
-                <time className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                  {new Date(event.createdAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}
-                </time>
+
+      <div className="space-y-3 max-h-48 overflow-y-auto pr-1">
+        {reversed.length === 0 ? (
+          <p className="text-sm text-center py-4" style={{ color: '#D6D3D1' }}>No activity yet</p>
+        ) : (
+          reversed.map((event) => {
+            const tone = TONE_STYLES[event.tone ?? 'neutral']
+            return (
+              <div key={event.id} className="flex items-start gap-3">
+                {/* Timeline dot */}
+                <div className="flex flex-col items-center shrink-0 mt-1.5">
+                  <div
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ background: tone.dot }}
+                  />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2 flex-wrap">
+                    <span
+                      className="text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-wide"
+                      style={{ background: tone.bg, color: tone.text }}
+                    >
+                      {event.label}
+                    </span>
+                    <span className="text-[10px] font-semibold" style={{ color: '#D6D3D1' }}>
+                      {timeAgo(event.createdAt)}
+                    </span>
+                  </div>
+                  <p className="text-xs font-semibold mt-0.5 leading-snug" style={{ color: '#78716C' }}>
+                    {event.detail}
+                  </p>
+                </div>
               </div>
-              <p className="mt-1 text-xs font-medium leading-relaxed text-slate-500">{event.detail}</p>
-            </div>
-          </li>
-        ))}
-      </ol>
-    </section>
+            )
+          })
+        )}
+      </div>
+    </div>
   )
 }

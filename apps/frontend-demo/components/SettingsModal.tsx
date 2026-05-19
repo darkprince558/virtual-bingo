@@ -2,104 +2,117 @@
 
 import React from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { X, Palette, Smile } from 'lucide-react'
-import { useSettings, ThemeType, AVATARS } from '@/contexts/SettingsContext'
+import { X, Smile } from 'lucide-react'
+import { useSettings, AVATARS } from '@/contexts/SettingsContext'
 
 interface SettingsModalProps {
   isOpen: boolean
   onClose: () => void
 }
 
-const THEMES: { id: ThemeType; label: string; colorClass: string }[] = [
-  { id: 'indigo', label: 'Classic Indigo', colorClass: 'bg-indigo-500' },
-  { id: 'rose', label: 'Vibrant Rose', colorClass: 'bg-rose-500' },
-  { id: 'emerald', label: 'Forest Emerald', colorClass: 'bg-emerald-500' },
-  { id: 'amber', label: 'Sunset Amber', colorClass: 'bg-amber-500' },
-]
-
 export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const { theme, setTheme, avatar, setAvatar } = useSettings()
+  const { avatar, setAvatar } = useSettings()
 
   return (
     <AnimatePresence>
       {isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm"
+            className="absolute inset-0"
+            style={{ background: 'rgba(28, 25, 23, 0.50)', backdropFilter: 'blur(8px)' }}
           />
+
+          {/* Modal */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            initial={{ opacity: 0, scale: 0.9, y: 16 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            className="relative w-full max-w-sm bg-white rounded-lg shadow-xl border border-slate-100 overflow-hidden flex flex-col max-h-[80vh]"
+            exit={{ opacity: 0, scale: 0.92, y: 10 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 24 }}
+            className="relative w-full max-w-sm overflow-hidden flex flex-col"
+            style={{
+              background: '#FFFFFF',
+              border: '1.5px solid #F0EDE8',
+              borderRadius: '1.5rem',
+              boxShadow: '0 24px 60px rgba(0,0,0,0.14)',
+              maxHeight: '80vh',
+            }}
           >
-            <div className="p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50 shrink-0">
-              <div className="flex items-center gap-2">
-                <Palette className="w-5 h-5 text-slate-500" />
-              <h3 className="font-bold text-slate-800">Appearance</h3>
+            {/* Header */}
+            <div
+              className="px-6 py-5 flex items-center justify-between shrink-0"
+              style={{ borderBottom: '1px solid #F4F2EF' }}
+            >
+              <div className="flex items-center gap-2.5">
+                <div
+                  className="w-8 h-8 rounded-xl flex items-center justify-center"
+                  style={{ background: '#FFF4F0' }}
+                >
+                  <Smile className="w-4 h-4" style={{ color: '#FF5A1F' }} />
+                </div>
+                <h3 className="font-extrabold" style={{ color: '#1C1917' }}>Your Avatar</h3>
               </div>
-              <button 
+              <button
                 onClick={onClose}
-                aria-label="Close appearance settings"
-                className="w-8 h-8 flex items-center justify-center bg-white rounded hover:bg-slate-200 transition-colors border border-slate-200 text-slate-500"
+                aria-label="Close settings"
+                className="w-8 h-8 flex items-center justify-center rounded-xl transition-all"
+                style={{ background: '#F4F2EF', color: '#A8A29E' }}
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
-            
-            <div className="p-6 overflow-y-auto flex-1">
-              <div className="mb-8">
-                <div className="flex items-center gap-2 mb-4">
-                  <Palette className="w-4 h-4 text-brand-500" />
-                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Choose Theme</p>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  {THEMES.map((t) => (
-                    <button
-                      key={t.id}
-                      onClick={() => setTheme(t.id)}
-                      className={`flex items-center gap-3 p-3 rounded-lg border text-left transition-all ${
-                        theme === t.id 
-                          ? 'border-brand-500 bg-brand-50 shadow-sm ring-1 ring-brand-500'
-                          : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50 bg-white'
-                      }`}
-                    >
-                      <div className={`w-5 h-5 rounded-full ${t.colorClass} shadow-inner`}></div>
-                      <span className={`text-sm font-semibold ${theme === t.id ? 'text-brand-900' : 'text-slate-700'}`}>
-                        {t.label}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </div>
 
-              <div>
-                <div className="flex items-center gap-2 mb-4">
-                  <Smile className="w-4 h-4 text-brand-500" />
-                  <p className="text-xs font-bold uppercase tracking-widest text-slate-400">Choose Avatar</p>
-                </div>
-                <div className="grid grid-cols-5 gap-2">
-                  {AVATARS.map((a) => (
-                    <button
+            {/* Avatar grid */}
+            <div className="p-6 overflow-y-auto flex-1">
+              <p className="text-xs font-extrabold uppercase tracking-widest mb-4" style={{ color: '#A8A29E' }}>
+                Choose your player avatar
+              </p>
+              <div className="grid grid-cols-5 gap-2">
+                {AVATARS.map((a) => {
+                  const isSelected = avatar === a
+                  return (
+                    <motion.button
                       key={a}
-                      onClick={() => setAvatar(a)}
-                      className={`aspect-square rounded-lg text-2xl flex items-center justify-center transition-all ${
-                        avatar === a
-                          ? 'bg-brand-100 border-2 border-brand-500 shadow-sm scale-110 z-10'
-                          : 'bg-slate-50 border border-slate-200 hover:bg-slate-100 hover:scale-105'
-                      }`}
+                      whileTap={{ scale: 0.9 }}
+                      whileHover={{ scale: 1.1 }}
+                      onClick={() => { setAvatar(a); onClose(); }}
+                      className="aspect-square rounded-2xl text-2xl flex items-center justify-center transition-all"
+                      style={{
+                        background: isSelected ? '#FFF4F0' : '#FAFAF9',
+                        border: isSelected ? '2px solid #FF5A1F' : '2px solid transparent',
+                        boxShadow: isSelected ? '0 4px 12px rgba(255,90,31,0.20)' : 'none',
+                        transform: isSelected ? 'scale(1.08)' : 'scale(1)',
+                      }}
+                      aria-label={`Select avatar ${a}`}
+                      aria-pressed={isSelected}
                     >
                       {a}
-                    </button>
-                  ))}
-                </div>
+                    </motion.button>
+                  )
+                })}
               </div>
             </div>
-            
+
+            {/* Current selection preview */}
+            <div
+              className="px-6 py-4 flex items-center gap-3 shrink-0"
+              style={{ borderTop: '1px solid #F4F2EF', background: '#FAFAF9' }}
+            >
+              <div
+                className="w-10 h-10 rounded-2xl flex items-center justify-center text-2xl"
+                style={{ background: '#FFF4F0', border: '2px solid #FFE4D9' }}
+              >
+                {avatar}
+              </div>
+              <div>
+                <p className="text-sm font-bold" style={{ color: '#1C1917' }}>Your avatar</p>
+                <p className="text-xs font-semibold" style={{ color: '#A8A29E' }}>Visible to all players in lobby</p>
+              </div>
+            </div>
           </motion.div>
         </div>
       )}
