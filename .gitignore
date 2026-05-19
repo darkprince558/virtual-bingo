@@ -1,0 +1,9 @@
+.DS_Store
+.idea/
+node_modules/
+.next/
+coverage/
+*.log
+.env
+.env.*
+!.env.example
