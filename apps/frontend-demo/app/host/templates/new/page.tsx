@@ -56,7 +56,7 @@ export default function NewTemplatePage() {
         </motion.div>
 
         {/* Form card */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="rounded-3xl p-6 sm:p-8" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 4px 24px rgba(0,0,0,0.05)' }}>
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="rounded-xl p-6 sm:p-8" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 4px 24px rgba(0,0,0,0.05)' }}>
 
           {step === 0 && (
             <div className="space-y-5">
@@ -81,8 +81,8 @@ export default function NewTemplatePage() {
               <div><label style={labelStyle}>Content Generation Mode</label>
                 <div className="space-y-2.5">
                   {['AI Generated', 'Manual', 'Reuse Word Bank'].map(mode => (
-                    <button key={mode} onClick={() => update('contentMode', mode)} className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-all" style={{ background: form.contentMode === mode ? '#FFF4F0' : '#FAFAF9', border: form.contentMode === mode ? '1.5px solid #FFE4D9' : '1.5px solid #F0EDE8' }}>
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: form.contentMode === mode ? 'linear-gradient(135deg, #FF7A42, #FF5A1F)' : '#F4F2EF' }}>
+                    <button key={mode} onClick={() => update('contentMode', mode)} className="w-full flex items-center gap-3 px-4 py-3.5 rounded-lg text-left transition-all" style={{ background: form.contentMode === mode ? '#FFF4F0' : '#FAFAF9', border: form.contentMode === mode ? '1.5px solid #FFE4D9' : '1.5px solid #F0EDE8' }}>
+                      <div className="w-9 h-9 rounded-md flex items-center justify-center" style={{ background: form.contentMode === mode ? 'linear-gradient(135deg, #FF7A42, #FF5A1F)' : '#F4F2EF' }}>
                         <Sparkles className="w-4 h-4" style={{ color: form.contentMode === mode ? '#fff' : '#A8A29E' }} />
                       </div>
                       <div><p className="text-sm font-bold" style={{ color: '#1C1917' }}>{mode}</p><p className="text-[10px] font-semibold" style={{ color: '#A8A29E' }}>{mode === 'AI Generated' ? 'AI creates fresh words from a prompt each week' : mode === 'Manual' ? 'You provide the word list manually' : 'Pick from previously saved word banks'}</p></div>
@@ -91,7 +91,7 @@ export default function NewTemplatePage() {
                 </div>
               </div>
               {form.contentMode === 'AI Generated' && (
-                <div className="flex items-start gap-3 px-4 py-3 rounded-2xl" style={{ background: '#F5F2FF', border: '1.5px solid #D9CCFF' }}>
+                <div className="flex items-start gap-3 px-4 py-3 rounded-lg" style={{ background: '#F5F2FF', border: '1.5px solid #D9CCFF' }}>
                   <Sparkles className="w-4 h-4 mt-0.5 shrink-0" style={{ color: '#7C5CFC' }} />
                   <div><p className="text-xs font-bold" style={{ color: '#4F30C2' }}>AI will generate words before each run</p><p className="text-[10px] font-semibold" style={{ color: '#7C5CFC' }}>You can review and edit the generated content in the Content Review screen.</p></div>
                 </div>
@@ -104,8 +104,8 @@ export default function NewTemplatePage() {
               <div><label style={labelStyle}>Voice Caller Mode</label>
                 <div className="space-y-2.5">
                   {[{ v: 'Default Neural', d: 'Use Azure default neural voice' }, { v: 'Employee Voice', d: 'Use approved employee voice profile' }, { v: 'Auto Select', d: 'System picks from approved voices' }].map(({ v, d }) => (
-                    <button key={v} onClick={() => update('voiceMode', v)} className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left transition-all" style={{ background: form.voiceMode === v ? '#EDFAF5' : '#FAFAF9', border: form.voiceMode === v ? '1.5px solid #A8EBCC' : '1.5px solid #F0EDE8' }}>
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: form.voiceMode === v ? 'linear-gradient(135deg, #3DC484, #22AA6A)' : '#F4F2EF' }}>
+                    <button key={v} onClick={() => update('voiceMode', v)} className="w-full flex items-center gap-3 px-4 py-3.5 rounded-lg text-left transition-all" style={{ background: form.voiceMode === v ? '#EDFAF5' : '#FAFAF9', border: form.voiceMode === v ? '1.5px solid #A8EBCC' : '1.5px solid #F0EDE8' }}>
+                      <div className="w-9 h-9 rounded-md flex items-center justify-center" style={{ background: form.voiceMode === v ? 'linear-gradient(135deg, #3DC484, #22AA6A)' : '#F4F2EF' }}>
                         <Mic className="w-4 h-4" style={{ color: form.voiceMode === v ? '#fff' : '#A8A29E' }} />
                       </div>
                       <div><p className="text-sm font-bold" style={{ color: '#1C1917' }}>{v}</p><p className="text-[10px] font-semibold" style={{ color: '#A8A29E' }}>{d}</p></div>
@@ -116,7 +116,7 @@ export default function NewTemplatePage() {
               <div className="h-px" style={{ background: '#F0EDE8' }} />
               <div>
                 <label style={labelStyle}>Prize Configuration</label>
-                <button onClick={() => update('prizeEnabled', !form.prizeEnabled)} className="w-full flex items-center justify-between px-4 py-3.5 rounded-2xl transition-all" style={{ background: form.prizeEnabled ? '#FFFBEB' : '#FAFAF9', border: form.prizeEnabled ? '1.5px solid #FDE68A' : '1.5px solid #F0EDE8' }}>
+                <button onClick={() => update('prizeEnabled', !form.prizeEnabled)} className="w-full flex items-center justify-between px-4 py-3.5 rounded-lg transition-all" style={{ background: form.prizeEnabled ? '#FFFBEB' : '#FAFAF9', border: form.prizeEnabled ? '1.5px solid #FDE68A' : '1.5px solid #F0EDE8' }}>
                   <div className="flex items-center gap-3"><Gift className="w-5 h-5" style={{ color: form.prizeEnabled ? '#D97706' : '#A8A29E' }} /><span className="text-sm font-bold" style={{ color: '#1C1917' }}>Enable prizes for winners</span></div>
                   <div className="w-10 h-6 rounded-full transition-all flex items-center" style={{ background: form.prizeEnabled ? '#22AA6A' : '#E7E5E4', padding: '2px' }}>
                     <motion.div animate={{ x: form.prizeEnabled ? 16 : 0 }} className="w-5 h-5 rounded-full bg-white" style={{ boxShadow: '0 1px 4px rgba(0,0,0,0.15)' }} />
@@ -129,15 +129,15 @@ export default function NewTemplatePage() {
 
           {/* Navigation buttons */}
           <div className="flex justify-between mt-8 pt-5" style={{ borderTop: '1.5px solid #F0EDE8' }}>
-            <button onClick={() => step > 0 && setStep(step - 1)} disabled={step === 0} className="px-5 py-3 rounded-2xl text-sm font-bold transition-all" style={{ background: '#F4F2EF', color: step === 0 ? '#D6D3D1' : '#57534E' }}>
+            <button onClick={() => step > 0 && setStep(step - 1)} disabled={step === 0} className="px-5 py-3 rounded-lg text-sm font-bold transition-all" style={{ background: '#F4F2EF', color: step === 0 ? '#D6D3D1' : '#57534E' }}>
               Previous
             </button>
             {step < STEPS.length - 1 ? (
-              <button onClick={() => setStep(step + 1)} className="px-6 py-3 rounded-2xl text-sm font-extrabold" style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)', color: '#fff', boxShadow: '0 4px 16px rgba(255,90,31,0.30)' }}>
+              <button onClick={() => setStep(step + 1)} className="px-6 py-3 rounded-lg text-sm font-extrabold" style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)', color: '#fff', boxShadow: '0 4px 16px rgba(255,90,31,0.30)' }}>
                 Continue
               </button>
             ) : (
-              <button onClick={() => router.push('/host/templates')} className="px-6 py-3 rounded-2xl text-sm font-extrabold" style={{ background: 'linear-gradient(135deg, #3DC484, #22AA6A)', color: '#fff', boxShadow: '0 4px 16px rgba(34,170,106,0.30)' }}>
+              <button onClick={() => router.push('/host/templates')} className="px-6 py-3 rounded-lg text-sm font-extrabold" style={{ background: 'linear-gradient(135deg, #3DC484, #22AA6A)', color: '#fff', boxShadow: '0 4px 16px rgba(34,170,106,0.30)' }}>
                 Create Template
               </button>
             )}

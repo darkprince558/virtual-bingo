@@ -11,7 +11,7 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: 'Virtual Bingo — Team Game',
+  title: 'Virtual Bingo | Team Game',
   description: 'A live, interactive corporate bingo game. Centralized cards, real-time word calls, claim review, and winner tracking.',
 };
 

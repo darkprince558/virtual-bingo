@@ -1,121 +1,262 @@
 'use client'
 
-import { useState } from 'react'
-import { motion, AnimatePresence } from 'motion/react'
-import { useRouter } from 'next/navigation'
+import { useCallback, useEffect, useMemo, useState, Suspense } from 'react'
+import { motion } from 'motion/react'
+import { useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { DashboardShell } from '@/components/DashboardShell'
-import { mockWordSet } from '@/lib/mockAdminData'
-import { ChevronLeft, Sparkles, Check, X, RefreshCw, AlertTriangle, Edit3, CheckCircle2 } from 'lucide-react'
+import { apiClient } from '@/lib/apiClient'
+import { displayBackendValue, mapContentStatus } from '@/lib/uiMappers'
+import type { CallerAssetResponse, GameContentResponse, GameRunResponse } from '@/types/api'
+import { ChevronLeft, Sparkles, Check, RefreshCw, AlertTriangle, Edit3, CheckCircle2, Lock, Radio } from 'lucide-react'
 
 export default function ContentReviewPage() {
-  const router = useRouter()
-  const [words, setWords] = useState(mockWordSet.words)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editValue, setEditValue] = useState('')
-  const [approved, setApproved] = useState(false)
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <ContentReviewContent />
+    </Suspense>
+  )
+}
 
-  const toggleWord = (id: string) => {
-    setWords(prev => prev.map(w => w.id === id ? { ...w, approved: !w.approved } : w))
+function ContentReviewContent() {
+  const searchParams = useSearchParams()
+  const gameId = searchParams.get('gameId')
+
+  const [game, setGame] = useState<GameRunResponse | null>(null)
+  const [content, setContent] = useState<GameContentResponse | null>(null)
+  const [wordsText, setWordsText] = useState('')
+  const [topic, setTopic] = useState('')
+  const [summary, setSummary] = useState('')
+  const [callerStyle, setCallerStyle] = useState('')
+  const [assets, setAssets] = useState<CallerAssetResponse[]>([])
+  const [isLoading, setIsLoading] = useState(Boolean(gameId))
+  const [isWorking, setIsWorking] = useState(false)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const words = useMemo(() => wordsText.split('\n').map(word => word.trim()).filter(Boolean), [wordsText])
+  const isLocked = Boolean(content?.lockedAt)
+
+  const syncContent = useCallback((next: GameContentResponse) => {
+    setContent(next)
+    setTopic(next.topic)
+    setSummary(next.summary)
+    setCallerStyle(next.callerStyle || '')
+    setWordsText(next.words.join('\n'))
+  }, [])
+
+  const load = useCallback(async () => {
+    if (!gameId) return
+    const run = await apiClient<GameRunResponse>(`/games/${gameId}`)
+    setGame(run)
+    try {
+      const nextContent = await apiClient<GameContentResponse>(`/games/${gameId}/content`, { devUserRole: 'host' })
+      syncContent(nextContent)
+      setError(null)
+    } catch (err) {
+      setContent(null)
+      setWordsText('')
+      setTopic('')
+      setSummary('')
+      setCallerStyle('')
+      setError(err instanceof Error ? err.message : 'No generated content yet')
+    }
+  }, [gameId, syncContent])
+
+  useEffect(() => {
+    if (!gameId) return
+    let cancelled = false
+
+    async function run() {
+      try {
+        await load()
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load AI content review')
+        }
+      } finally {
+        if (!cancelled) {
+          setIsLoading(false)
+        }
+      }
+    }
+
+    void run()
+
+    return () => {
+      cancelled = true
+    }
+  }, [gameId, load])
+
+  const runAction = async (label: string, action: () => Promise<void>) => {
+    setIsWorking(true)
+    setNotice(null)
+    try {
+      await action()
+      setNotice(label)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Action failed')
+    } finally {
+      setIsWorking(false)
+    }
   }
-  const startEdit = (id: string, word: string) => { setEditingId(id); setEditValue(word) }
-  const saveEdit = (id: string) => {
-    setWords(prev => prev.map(w => w.id === id ? { ...w, word: editValue } : w))
-    setEditingId(null)
+
+  const prepareContent = () => runAction('AI content generated with the local backend pipeline.', async () => {
+    if (!gameId) return
+    const next = await apiClient<GameContentResponse>(`/games/${gameId}/content/prepare`, { method: 'POST', devUserRole: 'host' })
+    syncContent(next)
+    setError(null)
+  })
+
+  const saveEdits = () => runAction('Content edits saved.', async () => {
+    if (!gameId) return
+    const next = await apiClient<GameContentResponse>(`/games/${gameId}/content`, {
+      method: 'PATCH',
+      devUserRole: 'host',
+      body: JSON.stringify({ topic, summary, words, callerStyle: callerStyle || undefined })
+    })
+    syncContent(next)
+    setError(null)
+  })
+
+  const lockContent = () => runAction('Content locked and ready for live play.', async () => {
+    if (!gameId) return
+    const next = await apiClient<GameContentResponse>(`/games/${gameId}/content/lock`, { method: 'POST', devUserRole: 'host' })
+    syncContent(next)
+    setError(null)
+  })
+
+  const generateAssets = () => runAction('Caller assets generated.', async () => {
+    if (!gameId) return
+    const nextAssets = await apiClient<CallerAssetResponse[]>(`/games/${gameId}/caller-assets/generate`, { method: 'POST', devUserRole: 'host' })
+    setAssets(nextAssets)
+  })
+
+  const openLobby = () => runAction('Lobby opened.', async () => {
+    if (!gameId) return
+    const run = await apiClient<GameRunResponse>(`/games/${gameId}/lobby/open`, { method: 'POST', devUserRole: 'host' })
+    setGame(run)
+  })
+
+  if (!gameId) {
+    return (
+      <DashboardShell role="host" userName="Admin Team">
+        <div className="p-6 max-w-xl mx-auto">
+          <Link href="/host" className="flex items-center gap-1.5 text-sm font-bold mb-6" style={{ color: '#A8A29E' }}>
+            <ChevronLeft className="w-4 h-4" /> Back to Dashboard
+          </Link>
+          <div className="rounded-xl p-6 text-center" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8' }}>
+            <Sparkles className="w-8 h-8 mx-auto mb-3" style={{ color: '#F59E0B' }} />
+            <h1 className="text-2xl font-black mb-2" style={{ color: '#1C1917' }}>No game selected</h1>
+            <p className="text-sm font-semibold mb-5" style={{ color: '#78716C' }}>Choose a real game from the host dashboard to prepare AI words.</p>
+            <Link href="/host" className="inline-flex px-5 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FFF4F0', color: '#E8440A' }}>Open Host Dashboard</Link>
+          </div>
+        </div>
+      </DashboardShell>
+    )
   }
-  const approvedCount = words.filter(w => w.approved).length
-  const flaggedCount = words.filter(w => w.flagged).length
 
   return (
     <DashboardShell role="host" userName="Admin Team">
-      <div className="p-4 sm:p-6 lg:p-8 max-w-4xl mx-auto">
-        <motion.button initial={{ opacity: 0 }} animate={{ opacity: 1 }} onClick={() => router.push('/host')} className="flex items-center gap-1.5 text-sm font-bold mb-6" style={{ color: '#A8A29E' }}>
+      <div className="p-4 sm:p-6 lg:p-8 max-w-5xl mx-auto">
+        <Link href="/host" className="flex items-center gap-1.5 text-sm font-bold mb-6" style={{ color: '#A8A29E' }}>
           <ChevronLeft className="w-4 h-4" /> Back to Dashboard
-        </motion.button>
+        </Link>
 
-        {/* Header */}
         <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
           <div className="flex items-center gap-3 mb-2">
-            <div className="w-10 h-10 rounded-2xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #FBBF24, #F59E0B)', boxShadow: '0 4px 12px rgba(245,158,11,0.25)' }}>
+            <div className="w-10 h-10 rounded-lg flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #FBBF24, #F59E0B)', boxShadow: '0 4px 12px rgba(245,158,11,0.25)' }}>
               <Sparkles className="w-5 h-5 text-white" />
             </div>
             <div>
               <h1 className="text-2xl sm:text-3xl font-black tracking-tight" style={{ color: '#1C1917' }}>AI Content Review</h1>
-              <p className="text-xs font-semibold" style={{ color: '#A8A29E' }}>{mockWordSet.templateName} · Generated {new Date(mockWordSet.generatedAt).toLocaleTimeString()}</p>
+              <p className="text-xs font-semibold" style={{ color: '#A8A29E' }}>{game?.name || 'Loading game'} · {content ? mapContentStatus(content.status) : 'Not generated'}</p>
             </div>
           </div>
         </motion.div>
 
-        {/* Prompt card */}
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="rounded-2xl p-4 mb-6" style={{ background: '#F5F2FF', border: '1.5px solid #D9CCFF' }}>
-          <p className="text-[10px] font-extrabold uppercase tracking-wider mb-1" style={{ color: '#6440E8' }}>Generation Prompt</p>
-          <p className="text-sm font-semibold" style={{ color: '#4F30C2' }}>{mockWordSet.prompt}</p>
-        </motion.div>
+        {notice && <div className="mb-5 rounded-lg p-4 text-sm font-bold" style={{ background: '#EDFAF5', border: '1.5px solid #A8EBCC', color: '#116B3F' }}>{notice}</div>}
+        {error && <div className="mb-5 rounded-lg p-4 text-sm font-bold" style={{ background: '#FFF1F2', border: '1.5px solid #FECDD3', color: '#BE123C' }}>{error}</div>}
 
-        {/* Stats row */}
-        <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="grid grid-cols-3 gap-3 mb-6">
-          <div className="rounded-2xl p-3 text-center" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8' }}>
-            <p className="text-xl font-black" style={{ color: '#1C1917' }}>{words.length}</p>
-            <p className="text-[10px] font-bold uppercase" style={{ color: '#A8A29E' }}>Total</p>
-          </div>
-          <div className="rounded-2xl p-3 text-center" style={{ background: '#EDFAF5', border: '1.5px solid #A8EBCC' }}>
-            <p className="text-xl font-black" style={{ color: '#116B3F' }}>{approvedCount}</p>
-            <p className="text-[10px] font-bold uppercase" style={{ color: '#178A53' }}>Approved</p>
-          </div>
-          <div className="rounded-2xl p-3 text-center" style={{ background: flaggedCount > 0 ? '#FFFBEB' : '#F4F2EF', border: `1.5px solid ${flaggedCount > 0 ? '#FDE68A' : '#E7E5E4'}` }}>
-            <p className="text-xl font-black" style={{ color: flaggedCount > 0 ? '#B45309' : '#A8A29E' }}>{flaggedCount}</p>
-            <p className="text-[10px] font-bold uppercase" style={{ color: flaggedCount > 0 ? '#D97706' : '#A8A29E' }}>Flagged</p>
-          </div>
-        </motion.div>
-
-        {/* Word grid */}
-        <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="rounded-3xl p-5 sm:p-6 mb-6" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-extrabold uppercase tracking-widest" style={{ color: '#A8A29E' }}>Generated Words</h2>
-            <button className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-full" style={{ background: '#F5F2FF', color: '#6440E8' }}>
-              <RefreshCw className="w-3.5 h-3.5" /> Regenerate All
+        {isLoading ? (
+          <div className="rounded-xl p-8" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8' }}>Loading AI review...</div>
+        ) : !content ? (
+          <div className="rounded-xl p-6 text-center" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8' }}>
+            <AlertTriangle className="w-8 h-8 mx-auto mb-3" style={{ color: '#F59E0B' }} />
+            <h2 className="text-xl font-black mb-2" style={{ color: '#1C1917' }}>No generated content yet</h2>
+            <p className="text-sm font-semibold mb-5" style={{ color: '#78716C' }}>Use the Go backend pipeline to generate a reviewable topic, summary, and word list.</p>
+            <button onClick={prepareContent} disabled={isWorking} className="inline-flex items-center gap-2 px-5 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FF5A1F', color: '#FFFFFF', opacity: isWorking ? 0.7 : 1 }}>
+              <Sparkles className="w-4 h-4" /> {isWorking ? 'Generating...' : 'Generate AI Content'}
             </button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-            {words.map((w, i) => (
-              <motion.div key={w.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 + i * 0.02 }} className="flex items-center gap-3 px-3.5 py-3 rounded-2xl group" style={{ background: w.flagged ? '#FFFBEB' : w.approved ? '#FAFAF9' : '#FFF1F2', border: `1.5px solid ${w.flagged ? '#FDE68A' : w.approved ? '#F0EDE8' : '#FECDD3'}` }}>
-                <button onClick={() => toggleWord(w.id)} className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0 transition-all" style={{ background: w.approved ? '#D5F5E6' : '#FFE4E6', color: w.approved ? '#116B3F' : '#BE123C' }}>
-                  {w.approved ? <Check className="w-4 h-4" /> : <X className="w-4 h-4" />}
-                </button>
-                {editingId === w.id ? (
-                  <div className="flex-1 flex gap-2">
-                    <input autoFocus className="flex-1 px-2 py-1 rounded-lg text-sm font-bold outline-none" style={{ background: '#FAF8F5', border: '1.5px solid #FF5A1F', color: '#1C1917' }} value={editValue} onChange={e => setEditValue(e.target.value)} onKeyDown={e => e.key === 'Enter' && saveEdit(w.id)} />
-                    <button onClick={() => saveEdit(w.id)} className="w-7 h-7 rounded-lg flex items-center justify-center" style={{ background: '#D5F5E6', color: '#116B3F' }}><Check className="w-4 h-4" /></button>
-                  </div>
-                ) : (
-                  <>
-                    <span className="flex-1 text-sm font-bold truncate" style={{ color: '#1C1917' }}>{w.word}</span>
-                    {w.flagged && <AlertTriangle className="w-4 h-4 shrink-0" style={{ color: '#D97706' }} />}
-                    <button onClick={() => startEdit(w.id, w.word)} className="w-7 h-7 rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: '#F4F2EF', color: '#78716C' }}><Edit3 className="w-3.5 h-3.5" /></button>
-                  </>
-                )}
-              </motion.div>
-            ))}
-          </div>
-        </motion.div>
-
-        {/* Approve action */}
-        {!approved ? (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.3 }} className="flex flex-col sm:flex-row gap-3">
-            <button onClick={() => setApproved(true)} className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl text-base font-extrabold transition-all" style={{ background: 'linear-gradient(135deg, #3DC484, #22AA6A)', color: '#fff', boxShadow: '0 6px 20px rgba(34,170,106,0.30)' }}>
-              <CheckCircle2 className="w-5 h-5" /> Approve Word Set
-            </button>
-            <button className="flex items-center justify-center gap-2 px-6 py-4 rounded-2xl text-sm font-bold" style={{ background: '#F4F2EF', color: '#78716C', border: '1.5px solid #E7E5E4' }}>
-              <RefreshCw className="w-4 h-4" /> Regenerate
-            </button>
-          </motion.div>
         ) : (
-          <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="flex items-center gap-4 px-6 py-5 rounded-3xl" style={{ background: '#EDFAF5', border: '1.5px solid #A8EBCC' }}>
-            <CheckCircle2 className="w-8 h-8" style={{ color: '#22AA6A' }} />
-            <div>
-              <p className="text-base font-extrabold" style={{ color: '#0D512F' }}>Word Set Approved ✓</p>
-              <p className="text-sm font-semibold" style={{ color: '#178A53' }}>{approvedCount} words locked in for the next game run.</p>
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <div className="lg:col-span-8 rounded-xl p-5 sm:p-6" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-sm font-extrabold uppercase tracking-widest" style={{ color: '#A8A29E' }}>Generated Package</h2>
+                <span className="text-[10px] font-black px-2.5 py-1 rounded-full uppercase" style={{ background: isLocked ? '#EDFAF5' : '#FEF3C7', color: isLocked ? '#116B3F' : '#B45309' }}>
+                  {isLocked ? 'Locked' : mapContentStatus(content.status)}
+                </span>
+              </div>
+              <div className="space-y-4">
+                <label className="block">
+                  <span className="text-xs font-extrabold" style={{ color: '#78716C' }}>Topic</span>
+                  <input value={topic} onChange={e => setTopic(e.target.value)} disabled={isLocked} className="mt-1 w-full px-4 py-3 rounded-lg text-sm font-bold outline-none" style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#1C1917' }} />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-extrabold" style={{ color: '#78716C' }}>Summary</span>
+                  <textarea value={summary} onChange={e => setSummary(e.target.value)} disabled={isLocked} rows={3} className="mt-1 w-full px-4 py-3 rounded-lg text-sm font-bold outline-none resize-none" style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#1C1917' }} />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-extrabold" style={{ color: '#78716C' }}>Caller Style</span>
+                  <input value={callerStyle} onChange={e => setCallerStyle(e.target.value)} disabled={isLocked} placeholder="Energetic, concise, work-friendly" className="mt-1 w-full px-4 py-3 rounded-lg text-sm font-bold outline-none" style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#1C1917' }} />
+                </label>
+                <label className="block">
+                  <span className="text-xs font-extrabold" style={{ color: '#78716C' }}>Words ({words.length})</span>
+                  <textarea value={wordsText} onChange={e => setWordsText(e.target.value)} disabled={isLocked} rows={14} className="mt-1 w-full px-4 py-3 rounded-lg text-sm font-bold outline-none resize-none" style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#1C1917' }} />
+                </label>
+              </div>
             </div>
-          </motion.div>
+
+            <div className="lg:col-span-4 flex flex-col gap-4">
+              <div className="rounded-xl p-5" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8' }}>
+                <h3 className="text-sm font-extrabold mb-4" style={{ color: '#1C1917' }}>Pipeline Actions</h3>
+                <div className="space-y-2.5">
+                  <button onClick={prepareContent} disabled={isWorking || isLocked} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#F5F2FF', color: '#6440E8', opacity: isWorking || isLocked ? 0.55 : 1 }}>
+                    <RefreshCw className="w-4 h-4" /> Regenerate Draft
+                  </button>
+                  <button onClick={saveEdits} disabled={isWorking || isLocked || words.length < 24} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FFF4F0', color: '#C23208', opacity: isWorking || isLocked || words.length < 24 ? 0.55 : 1 }}>
+                    <Edit3 className="w-4 h-4" /> Save Edits
+                  </button>
+                  <button onClick={lockContent} disabled={isWorking || isLocked || words.length < 24} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#EDFAF5', color: '#116B3F', opacity: isWorking || isLocked || words.length < 24 ? 0.55 : 1 }}>
+                    <Lock className="w-4 h-4" /> Lock Word Set
+                  </button>
+                  <button onClick={generateAssets} disabled={isWorking || !isLocked} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FEF3C7', color: '#B45309', opacity: isWorking || !isLocked ? 0.55 : 1 }}>
+                    <Radio className="w-4 h-4" /> Generate Caller Assets
+                  </button>
+                  <button onClick={openLobby} disabled={isWorking || !isLocked} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FF5A1F', color: '#FFFFFF', opacity: isWorking || !isLocked ? 0.55 : 1 }}>
+                    <CheckCircle2 className="w-4 h-4" /> Open Lobby
+                  </button>
+                </div>
+              </div>
+
+              <div className="rounded-xl p-5" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8' }}>
+                <h3 className="text-sm font-extrabold mb-3" style={{ color: '#1C1917' }}>Backend State</h3>
+                <div className="space-y-2 text-xs font-bold" style={{ color: '#78716C' }}>
+                  <p>Status: {mapContentStatus(content.status)}</p>
+                  <p>Provider: {displayBackendValue(content.generationProvider)}</p>
+                  <p>Locked word set: {content.lockedWordSetId || 'Not locked'}</p>
+                  <p>Caller assets: {assets.length > 0 ? assets.length : 'Not generated in this view'}</p>
+                  <p>Game status: {displayBackendValue(game?.status)}</p>
+                </div>
+                {isLocked && (
+                  <Link href={`/host/live?gameId=${gameId}`} className="mt-4 w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#F4F2EF', color: '#44403C' }}>
+                    Open Live Control
+                  </Link>
+                )}
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </DashboardShell>

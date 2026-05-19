@@ -1,4 +1,4 @@
-export type GameState = 'Waiting' | 'Starting Soon' | 'Live' | 'Paused' | 'Finished';
+export type GameState = 'Waiting' | 'Starting Soon' | 'Lobby Open' | 'Live' | 'Paused' | 'Finished' | 'Cancelled' | 'Failed';
 
 import { Player } from './player';
 

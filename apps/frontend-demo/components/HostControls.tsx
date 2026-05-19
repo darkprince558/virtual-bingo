@@ -23,8 +23,8 @@ interface ControlButton {
 export function HostControls({ status, onStart, onNextWord, onPause, onEnd }: HostControlsProps) {
   const isLive = status === 'Live'
   const isPaused = status === 'Paused'
-  const isFinished = status === 'Finished'
-  const isWaiting = status === 'Waiting' || status === 'Starting Soon'
+  const isFinished = status === 'Finished' || status === 'Cancelled' || status === 'Failed'
+  const isWaiting = status === 'Waiting' || status === 'Starting Soon' || status === 'Lobby Open'
 
   const BUTTON_STYLES = {
     primary: {
@@ -86,7 +86,7 @@ export function HostControls({ status, onStart, onNextWord, onPause, onEnd }: Ho
 
   return (
     <div
-      className="rounded-3xl p-5"
+      className="rounded-xl p-5"
       style={{
         background: '#FFFFFF',
         border: '1.5px solid #F0EDE8',
@@ -100,7 +100,7 @@ export function HostControls({ status, onStart, onNextWord, onPause, onEnd }: Ho
         </span>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {controls.map((btn) => {
           const s = BUTTON_STYLES[btn.variant]
           return (
@@ -110,7 +110,7 @@ export function HostControls({ status, onStart, onNextWord, onPause, onEnd }: Ho
               whileHover={!btn.disabled ? { y: -1 } : {}}
               onClick={btn.action}
               disabled={btn.disabled}
-              className="flex items-center justify-center gap-2 px-4 py-3 rounded-2xl font-bold text-sm transition-all"
+              className="flex items-center justify-center gap-2 px-4 py-4 sm:py-3 rounded-xl font-extrabold text-[15px] sm:text-sm transition-all"
               style={{
                 ...s,
                 opacity: btn.disabled ? 0.45 : 1,

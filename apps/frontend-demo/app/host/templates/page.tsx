@@ -21,19 +21,19 @@ export default function TemplatesPage() {
           <div>
             <p className="text-[10px] font-extrabold uppercase tracking-[0.2em] mb-1.5" style={{ color: '#A8A29E' }}>Game Templates</p>
             <h1 className="text-3xl sm:text-4xl font-black tracking-tight mb-2" style={{ color: '#1C1917' }}>Recurring Games</h1>
-            <p className="text-sm font-semibold" style={{ color: '#78716C' }}>Set up a template once — the system creates weekly runs automatically.</p>
+            <p className="text-sm font-semibold" style={{ color: '#78716C' }}>Set up a template once and the system creates weekly runs automatically.</p>
           </div>
-          <Link href="/host/templates/new" className="flex items-center justify-center gap-2 px-5 py-3 rounded-2xl text-sm font-extrabold shrink-0" style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)', color: '#FFFFFF', boxShadow: '0 4px 16px rgba(255,90,31,0.30)' }}>
+          <Link href="/host/templates/new" className="flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-extrabold shrink-0" style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)', color: '#FFFFFF', boxShadow: '0 4px 16px rgba(255,90,31,0.30)' }}>
             <Plus className="w-4 h-4" /> New Template
           </Link>
         </motion.div>
 
         <div className="space-y-4">
           {templates.map((tmpl, i) => (
-            <motion.div key={tmpl.id} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 + i * 0.06 }} className="rounded-3xl p-5 sm:p-6" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)', opacity: tmpl.isActive ? 1 : 0.7 }}>
+            <motion.div key={tmpl.id} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 + i * 0.06 }} className="rounded-xl p-5 sm:p-6" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)', opacity: tmpl.isActive ? 1 : 0.7 }}>
               <div className="flex flex-col sm:flex-row sm:items-start gap-4">
                 <div className="flex items-start gap-4 flex-1 min-w-0">
-                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0 text-xl font-black" style={{ background: tmpl.isActive ? 'linear-gradient(135deg, #FF7A42, #FF5A1F)' : '#E7E5E4', color: tmpl.isActive ? '#FFFFFF' : '#A8A29E', boxShadow: tmpl.isActive ? '0 4px 12px rgba(255,90,31,0.25)' : 'none' }}>
+                  <div className="w-12 h-12 rounded-lg flex items-center justify-center shrink-0 text-xl font-black" style={{ background: tmpl.isActive ? 'linear-gradient(135deg, #FF7A42, #FF5A1F)' : '#E7E5E4', color: tmpl.isActive ? '#FFFFFF' : '#A8A29E', boxShadow: tmpl.isActive ? '0 4px 12px rgba(255,90,31,0.25)' : 'none' }}>
                     {tmpl.name.charAt(0)}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -56,7 +56,7 @@ export default function TemplatesPage() {
                   </div>
                 </div>
                 <div className="flex sm:flex-col items-center sm:items-end gap-3 sm:gap-2 shrink-0">
-                  <button onClick={() => toggleActive(tmpl.id)} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all" style={{ background: tmpl.isActive ? '#EDFAF5' : '#F4F2EF', color: tmpl.isActive ? '#116B3F' : '#78716C', border: `1.5px solid ${tmpl.isActive ? '#A8EBCC' : '#E7E5E4'}` }}>
+                  <button onClick={() => toggleActive(tmpl.id)} className="flex items-center gap-2 px-3 py-2 rounded-md text-xs font-bold transition-all" style={{ background: tmpl.isActive ? '#EDFAF5' : '#F4F2EF', color: tmpl.isActive ? '#116B3F' : '#78716C', border: `1.5px solid ${tmpl.isActive ? '#A8EBCC' : '#E7E5E4'}` }}>
                     {tmpl.isActive ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
                     {tmpl.isActive ? 'Pause' : 'Resume'}
                   </button>

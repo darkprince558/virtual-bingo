@@ -1,4 +1,19 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1';
+function normalizeApiBaseUrl(rawUrl: string, shouldAppendApiPrefix: boolean) {
+  const trimmed = rawUrl.trim().replace(/\/+$/, '')
+
+  if (!shouldAppendApiPrefix || trimmed.endsWith('/api/v1')) {
+    return trimmed
+  }
+
+  return `${trimmed}/api/v1`
+}
+
+export const API_BASE_URL = normalizeApiBaseUrl(
+  process.env.NEXT_PUBLIC_API_URL ||
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    'http://localhost:8080/api/v1',
+  !process.env.NEXT_PUBLIC_API_URL && !!process.env.NEXT_PUBLIC_API_BASE_URL
+)
 
 export interface ApiClientOptions extends RequestInit {
   // Pass dynamic user info for dev auth simulation
@@ -30,11 +45,16 @@ export async function apiClient<T>(endpoint: string, options: ApiClientOptions =
     config.body = customConfig.body;
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, config);
+  let response: Response
+  try {
+    response = await fetch(`${API_BASE_URL}${endpoint}`, config)
+  } catch {
+    throw new Error(`Unable to reach the Virtual Bingo API at ${API_BASE_URL}. Check NEXT_PUBLIC_API_URL and make sure the Go backend is running.`)
+  }
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData?.error?.message || `API Error: ${response.status} ${response.statusText}`);
+    throw new Error(errorData?.error?.message || `API Error: ${response.status} ${response.statusText} for ${endpoint}`);
   }
 
   // The backend wraps responses in a { data: ... } object per api.go writeData()

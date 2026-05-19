@@ -20,7 +20,10 @@ const STATUS_STYLES: Record<string, { dot: string; text: string; label: string }
   Waiting: { dot: '#F59E0B', text: '#B45309', label: 'Waiting' },
   'Starting Soon': { dot: '#F59E0B', text: '#B45309', label: 'Starting Soon' },
   Paused: { dot: '#F59E0B', text: '#D97706', label: 'Paused' },
+  'Lobby Open': { dot: '#22AA6A', text: '#116B3F', label: 'Lobby Open' },
   Finished: { dot: '#A8A29E', text: '#78716C', label: 'Finished' },
+  Cancelled: { dot: '#F43F5E', text: '#BE123C', label: 'Cancelled' },
+  Failed: { dot: '#F43F5E', text: '#BE123C', label: 'Failed' },
 }
 
 export function TopNav({ gameCode, playerName, status, role, connectionState = 'Connected' }: TopNavProps) {
@@ -32,7 +35,7 @@ export function TopNav({ gameCode, playerName, status, role, connectionState = '
   return (
     <>
       <nav
-        className="h-[68px] px-4 sm:px-8 flex items-center justify-between shrink-0"
+        className="h-14 sm:h-[68px] px-3 sm:px-8 flex items-center justify-between shrink-0"
         style={{
           background: 'rgba(255,255,255,0.85)',
           backdropFilter: 'blur(12px)',
@@ -43,7 +46,7 @@ export function TopNav({ gameCode, playerName, status, role, connectionState = '
         <div className="flex items-center gap-3 sm:gap-5">
           <Link href="/" className="flex items-center gap-2.5 group">
             <div
-              className="w-9 h-9 rounded-2xl flex items-center justify-center text-white font-black text-lg shrink-0 transition-transform group-hover:scale-105"
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-black text-lg shrink-0 transition-transform group-hover:scale-105"
               style={{
                 background: 'linear-gradient(135deg, #FF7A42 0%, #FF5A1F 100%)',
                 boxShadow: '0 4px 12px rgba(255, 90, 31, 0.35)',
@@ -111,7 +114,7 @@ export function TopNav({ gameCode, playerName, status, role, connectionState = '
                 </p>
               </div>
               <div
-                className="w-9 h-9 rounded-2xl flex items-center justify-center shrink-0 text-lg select-none overflow-hidden"
+                className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-lg select-none overflow-hidden"
                 style={{
                   background: role === 'host' ? 'linear-gradient(135deg, #7C5CFC, #9E80FF)' : '#FFF4F0',
                   border: role === 'host' ? 'none' : '2px solid #FFC5A8',
@@ -129,7 +132,7 @@ export function TopNav({ gameCode, playerName, status, role, connectionState = '
           <button
             onClick={() => setIsSettingsOpen(true)}
             aria-label="Open appearance settings"
-            className="w-9 h-9 flex items-center justify-center rounded-2xl transition-all"
+            className="w-9 h-9 flex items-center justify-center rounded-lg transition-all"
             style={{ color: '#A8A29E' }}
             onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = '#F4F2EF'; (e.currentTarget as HTMLButtonElement).style.color = '#78716C'; }}
             onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; (e.currentTarget as HTMLButtonElement).style.color = '#A8A29E'; }}

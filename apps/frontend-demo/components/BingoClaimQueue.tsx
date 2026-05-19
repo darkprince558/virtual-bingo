@@ -13,8 +13,8 @@ interface BingoClaimQueueProps {
 const STATUS_CHIP: Record<string, { bg: string; text: string; label: string }> = {
   Pending:   { bg: '#FEF3C7', text: '#D97706', label: 'Pending Review' },
   Valid:     { bg: '#EDFAF5', text: '#116B3F', label: 'Valid' },
-  Invalid:   { bg: '#FFF1F2', text: '#E11D48', label: 'Invalid' },
-  Confirmed: { bg: '#EDFAF5', text: '#116B3F', label: 'Confirmed' },
+  Invalid:   { bg: '#FFF1F2', text: '#E11D48', label: 'Rejected by Backend' },
+  Confirmed: { bg: '#EDFAF5', text: '#116B3F', label: 'Confirmed by Backend' },
 }
 
 function getInitials(name: string) {
@@ -27,7 +27,7 @@ export function BingoClaimQueue({ claims, onApprove, onReject }: BingoClaimQueue
 
   return (
     <div
-      className="h-full rounded-3xl flex flex-col overflow-hidden"
+      className="h-full rounded-xl flex flex-col overflow-hidden"
       style={{
         background: '#FFFFFF',
         border: '1.5px solid #F0EDE8',
@@ -37,7 +37,7 @@ export function BingoClaimQueue({ claims, onApprove, onReject }: BingoClaimQueue
       {/* Header */}
       <div className="px-5 pt-5 pb-4 flex items-center gap-3 shrink-0" style={{ borderBottom: '1px solid #F4F2EF' }}>
         <div
-          className="w-8 h-8 rounded-xl flex items-center justify-center"
+          className="w-8 h-8 rounded-md flex items-center justify-center"
           style={{ background: '#FEF3C7', color: '#D97706' }}
         >
           <AlertCircle className="w-4 h-4" />
@@ -63,7 +63,7 @@ export function BingoClaimQueue({ claims, onApprove, onReject }: BingoClaimQueue
         <AnimatePresence initial={false}>
           {claims.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-40 gap-3">
-              <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: '#F4F2EF' }}>
+              <div className="w-12 h-12 rounded-lg flex items-center justify-center" style={{ background: '#F4F2EF' }}>
                 <Check className="w-6 h-6" style={{ color: '#D6D3D1' }} />
               </div>
               <p className="text-sm font-semibold" style={{ color: '#D6D3D1' }}>No claims yet</p>
@@ -79,7 +79,7 @@ export function BingoClaimQueue({ claims, onApprove, onReject }: BingoClaimQueue
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, x: -20 }}
                   transition={{ type: 'spring', stiffness: 300, damping: 22 }}
-                  className="rounded-2xl p-4"
+                  className="rounded-lg p-4"
                   style={{
                     background: claim.status === 'Pending' ? '#FFFBF0' : '#FAFAF9',
                     border: `1.5px solid ${claim.status === 'Pending' ? '#FCD34D' : '#F0EDE8'}`,
@@ -88,7 +88,7 @@ export function BingoClaimQueue({ claims, onApprove, onReject }: BingoClaimQueue
                   <div className="flex items-start gap-3 mb-3">
                     {/* Avatar */}
                     <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center text-sm font-black shrink-0"
+                      className="w-9 h-9 rounded-md flex items-center justify-center text-sm font-black shrink-0"
                       style={{ background: '#FFF4F0', color: '#E8440A', border: '1.5px solid #FFE4D9' }}
                     >
                       {getInitials(claim.playerName)}
@@ -109,12 +109,12 @@ export function BingoClaimQueue({ claims, onApprove, onReject }: BingoClaimQueue
                     </span>
                   </div>
 
-                  {/* Action buttons (Pending only) */}
+                  {/* Action buttons */}
                   {claim.status === 'Pending' && (
                     <div className="flex gap-2 mt-2">
                       <button
                         onClick={() => onApprove(claim.id)}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-extrabold transition-all hover:opacity-90 active:scale-95"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-md text-xs font-extrabold transition-all hover:opacity-90 active:scale-95"
                         style={{ background: 'linear-gradient(135deg, #3DC484, #22AA6A)', color: '#FFFFFF', boxShadow: '0 4px 12px rgba(34, 170, 106, 0.25)' }}
                       >
                         <Check className="w-3.5 h-3.5" />
@@ -122,13 +122,33 @@ export function BingoClaimQueue({ claims, onApprove, onReject }: BingoClaimQueue
                       </button>
                       <button
                         onClick={() => onReject(claim.id)}
-                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-extrabold transition-all hover:opacity-90 active:scale-95"
+                        className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-md text-xs font-extrabold transition-all hover:opacity-90 active:scale-95"
                         style={{ background: '#FFF1F2', color: '#E11D48', border: '1.5px solid #FECDD3' }}
                       >
                         <X className="w-3.5 h-3.5" />
                         Reject
                       </button>
                     </div>
+                  )}
+                  {claim.status === 'Confirmed' && (
+                    <button
+                      onClick={() => onApprove(claim.id)}
+                      className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-md text-xs font-extrabold transition-all hover:opacity-90 active:scale-95"
+                      style={{ background: 'linear-gradient(135deg, #3DC484, #22AA6A)', color: '#FFFFFF', boxShadow: '0 4px 12px rgba(34, 170, 106, 0.25)' }}
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      Acknowledge Valid
+                    </button>
+                  )}
+                  {claim.status === 'Invalid' && (
+                    <button
+                      onClick={() => onReject(claim.id)}
+                      className="w-full flex items-center justify-center gap-1.5 py-2.5 rounded-md text-xs font-extrabold transition-all hover:opacity-90 active:scale-95"
+                      style={{ background: '#FFF1F2', color: '#E11D48', border: '1.5px solid #FECDD3' }}
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      Acknowledge Rejected
+                    </button>
                   )}
                 </motion.div>
               )

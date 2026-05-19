@@ -8,7 +8,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         fontFamily: "'Nunito', ui-rounded, system-ui, sans-serif",
       }}
     >
-      {/* Decorative blobs — GPU-composited so they never cause scroll paint */}
+      {/* Decorative blobs - GPU-composited so they never cause scroll paint */}
       <div
         aria-hidden="true"
         style={{
@@ -40,7 +40,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         }}
       />
 
-      {/* Content — isolated stacking context for smooth compositing */}
+      {/* Content - isolated stacking context for smooth compositing */}
       <div
         className="relative flex flex-col min-h-screen"
         style={{ isolation: 'isolate' }}

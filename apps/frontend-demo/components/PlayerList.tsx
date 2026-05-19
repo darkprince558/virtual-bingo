@@ -31,7 +31,7 @@ const AVATAR_COLORS = [
 export function PlayerList({ players, totalConnected }: PlayerListProps) {
   return (
     <div
-      className="h-full rounded-3xl flex flex-col overflow-hidden"
+      className="h-full rounded-xl flex flex-col overflow-hidden"
       style={{
         background: '#FFFFFF',
         border: '1.5px solid #F0EDE8',
@@ -41,7 +41,7 @@ export function PlayerList({ players, totalConnected }: PlayerListProps) {
       {/* Header */}
       <div className="px-5 pt-5 pb-4 flex items-center gap-3 shrink-0" style={{ borderBottom: '1px solid #F4F2EF' }}>
         <div
-          className="w-8 h-8 rounded-xl flex items-center justify-center"
+          className="w-8 h-8 rounded-md flex items-center justify-center"
           style={{ background: '#F5F2FF', color: '#7C5CFC' }}
         >
           <Users className="w-4 h-4" />
@@ -64,12 +64,12 @@ export function PlayerList({ players, totalConnected }: PlayerListProps) {
           return (
             <div
               key={player.id}
-              className="flex items-center gap-3 px-3.5 py-2.5 rounded-2xl"
+              className="flex items-center gap-3 px-3.5 py-2.5 rounded-lg"
               style={{ background: '#FAFAF9', border: '1.5px solid transparent' }}
             >
               {/* Avatar */}
               <div
-                className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-black shrink-0"
+                className="w-8 h-8 rounded-md flex items-center justify-center text-xs font-black shrink-0"
                 style={{ background: avatarColor.bg, color: avatarColor.text }}
               >
                 {getInitials(player.name)}

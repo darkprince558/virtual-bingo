@@ -66,7 +66,7 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
       <Link
         href={item.href}
         onClick={() => setMobileOpen(false)}
-        className="flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-bold transition-all relative group"
+        className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-bold transition-all relative group"
         style={{
           background: active ? (role === 'admin' ? '#F5F2FF' : '#FFF4F0') : 'transparent',
           color: active ? (role === 'admin' ? '#6440E8' : '#E8440A') : '#78716C',
@@ -127,7 +127,7 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
         <div className="p-5 pb-4">
           <Link href="/" className="flex items-center gap-2.5 group mb-5">
             <div
-              className="w-9 h-9 rounded-2xl flex items-center justify-center text-white font-black text-lg shrink-0 transition-transform group-hover:scale-105"
+              className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-black text-lg shrink-0 transition-transform group-hover:scale-105"
               style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)', boxShadow: '0 4px 12px rgba(255,90,31,0.30)' }}
             >
               B
@@ -139,11 +139,11 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
 
           {/* Role badge */}
           <div
-            className="flex items-center gap-2.5 px-4 py-3 rounded-2xl"
+            className="flex items-center gap-2.5 px-4 py-3 rounded-lg"
             style={{ background: role === 'admin' ? '#F5F2FF' : '#FFF4F0' }}
           >
             <div
-              className="w-8 h-8 rounded-xl flex items-center justify-center"
+              className="w-8 h-8 rounded-md flex items-center justify-center"
               style={{ background: roleBg, boxShadow: `0 4px 12px ${roleGlow}` }}
             >
               <Shield className="w-4 h-4 text-white" />
@@ -168,7 +168,7 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
         <div className="p-3 border-t" style={{ borderColor: '#F0EDE8' }}>
           <Link
             href="/"
-            className="flex items-center gap-2.5 px-4 py-3 rounded-2xl text-sm font-bold transition-all"
+            className="flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm font-bold transition-all"
             style={{ color: '#A8A29E' }}
           >
             <Home className="w-4 h-4" />
@@ -183,7 +183,7 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
       >
         <Link href="/" className="flex items-center gap-2">
           <div
-            className="w-8 h-8 rounded-xl flex items-center justify-center text-white font-black text-sm"
+            className="w-8 h-8 rounded-md flex items-center justify-center text-white font-black text-sm"
             style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)' }}
           >
             B
@@ -195,7 +195,7 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
         <button
           onClick={() => setMobileOpen(!mobileOpen)}
           aria-label="Toggle menu"
-          className="w-9 h-9 flex items-center justify-center rounded-xl"
+          className="w-9 h-9 flex items-center justify-center rounded-md"
           style={{ color: '#78716C' }}
         >
           {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
@@ -237,7 +237,7 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
                 <Link
                   href="/"
                   onClick={() => setMobileOpen(false)}
-                  className="flex items-center gap-2.5 px-4 py-3 rounded-2xl text-sm font-bold"
+                  className="flex items-center gap-2.5 px-4 py-3 rounded-lg text-sm font-bold"
                   style={{ color: '#A8A29E' }}
                 >
                   <Home className="w-4 h-4" />

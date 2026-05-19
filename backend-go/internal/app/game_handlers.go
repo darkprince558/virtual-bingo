@@ -40,6 +40,11 @@ type submitBingoClaimRequest struct {
 	Pattern  string `json:"pattern"`
 }
 
+type acknowledgeBingoClaimRequest struct {
+	Decision string `json:"decision"`
+	Note     string `json:"note"`
+}
+
 type updateGameSettingsRequest struct {
 	MarkingMode                  *string `json:"markingMode"`
 	AllowPlayerMarkingModeChoice *bool   `json:"allowPlayerMarkingModeChoice"`
@@ -891,6 +896,37 @@ func (s *Server) listBingoClaims(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeData(w, http.StatusOK, response)
+}
+
+func (s *Server) acknowledgeBingoClaim(w http.ResponseWriter, r *http.Request) {
+	if !requireDatabase(w, s.service) {
+		return
+	}
+
+	principal, err := s.service.Authenticate(r)
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	var req acknowledgeBingoClaimRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeAPIError(w, http.StatusBadRequest, "validation_error", "request body must be valid JSON")
+		return
+	}
+
+	event, err := s.service.AcknowledgeBingoClaim(r.Context(), principal, game.AcknowledgeBingoClaimInput{
+		GameRunID: r.PathValue("gameID"),
+		ClaimID:   r.PathValue("claimID"),
+		Decision:  req.Decision,
+		Note:      req.Note,
+	})
+	if err != nil {
+		mapServiceError(w, err)
+		return
+	}
+
+	writeData(w, http.StatusCreated, activityEventResponseFromDomain(event))
 }
 
 func (s *Server) getGameSummary(w http.ResponseWriter, r *http.Request) {

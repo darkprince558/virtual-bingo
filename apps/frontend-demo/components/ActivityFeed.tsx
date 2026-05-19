@@ -24,7 +24,7 @@ export function ActivityFeed({ events }: ActivityFeedProps) {
 
   return (
     <div
-      className="rounded-3xl p-5 flex flex-col"
+      className="rounded-xl p-5 flex flex-col"
       style={{
         background: '#FFFFFF',
         border: '1.5px solid #F0EDE8',

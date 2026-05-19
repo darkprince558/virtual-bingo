@@ -96,6 +96,7 @@ type Store interface {
 	CreateBingoClaim(context.Context, db.CreateBingoClaimParams) (domain.BingoClaim, error)
 	UpdateBingoClaimValidation(context.Context, db.UpdateBingoClaimValidationParams) (domain.BingoClaim, error)
 	SubmitBingoClaimTx(context.Context, db.SubmitBingoClaimTxParams) (db.SubmitBingoClaimTxResult, error)
+	AcknowledgeBingoClaimTx(context.Context, db.AcknowledgeBingoClaimTxParams) (domain.GameEvent, error)
 	GetBingoClaim(context.Context, string) (domain.BingoClaim, error)
 	ListBingoClaims(context.Context, string) ([]domain.BingoClaim, error)
 	CreateWinner(context.Context, db.CreateWinnerParams) (domain.Winner, error)
@@ -1962,6 +1963,74 @@ func (s *Service) GetBingoClaim(ctx context.Context, principal auth.Principal, g
 	return claim, nil
 }
 
+type AcknowledgeBingoClaimInput struct {
+	GameRunID string
+	ClaimID   string
+	Decision  string
+	Note      string
+}
+
+func (s *Service) AcknowledgeBingoClaim(ctx context.Context, principal auth.Principal, input AcknowledgeBingoClaimInput) (domain.ActivityEvent, error) {
+	user, err := s.authorizeHostMutation(ctx, principal, input.GameRunID)
+	if err != nil {
+		return domain.ActivityEvent{}, err
+	}
+
+	decision := strings.ToLower(strings.TrimSpace(input.Decision))
+	if decision != "approve" && decision != "reject" {
+		return domain.ActivityEvent{}, fmt.Errorf("%w: decision must be approve or reject", ErrValidation)
+	}
+
+	note := strings.TrimSpace(input.Note)
+	if len(note) > 240 {
+		return domain.ActivityEvent{}, fmt.Errorf("%w: note must be 240 characters or fewer", ErrValidation)
+	}
+
+	claim, err := s.store.GetBingoClaim(ctx, input.ClaimID)
+	if err != nil {
+		return domain.ActivityEvent{}, mapStoreError(err)
+	}
+	if claim.GameRunID != input.GameRunID {
+		return domain.ActivityEvent{}, ErrNotFound
+	}
+	if decision == "approve" && claim.Status != "confirmed" {
+		return domain.ActivityEvent{}, fmt.Errorf("%w: only confirmed claims can be acknowledged as valid", ErrConflict)
+	}
+	if decision == "reject" && claim.Status != "invalid" {
+		return domain.ActivityEvent{}, fmt.Errorf("%w: only invalid claims can be acknowledged as rejected", ErrConflict)
+	}
+
+	event, err := s.store.AcknowledgeBingoClaimTx(ctx, db.AcknowledgeBingoClaimTxParams{
+		GameRunID:   input.GameRunID,
+		ClaimID:     input.ClaimID,
+		Status:      claim.Status,
+		Decision:    decision,
+		Note:        note,
+		ActorUserID: &user.ID,
+	})
+	if err != nil {
+		return domain.ActivityEvent{}, mapStoreError(err)
+	}
+	s.emit(ctx, events.Event{
+		Type:     event.Type,
+		EntityID: input.ClaimID,
+		Payload:  map[string]any{"gameRunId": event.GameRunID, "claimId": input.ClaimID, "decision": decision},
+	})
+
+	sequence := event.Sequence
+	return domain.ActivityEvent{
+		ID:          event.ID,
+		GameRunID:   event.GameRunID,
+		Type:        event.Type,
+		EntityType:  stringPtr("bingo_claim"),
+		EntityID:    event.EntityID,
+		ActorUserID: &user.ID,
+		Payload:     event.Payload,
+		Sequence:    &sequence,
+		CreatedAt:   event.CreatedAt,
+	}, nil
+}
+
 func (s *Service) GetGameSummary(ctx context.Context, gameRunID string) (domain.GameSummary, error) {
 	run, err := s.store.GetGameRun(ctx, gameRunID)
 	if err != nil {
@@ -2355,6 +2424,10 @@ func stringPtrIfNotBlank(value string) *string {
 		return nil
 	}
 
+	return &value
+}
+
+func stringPtr(value string) *string {
 	return &value
 }
 

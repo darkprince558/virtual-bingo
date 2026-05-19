@@ -1207,11 +1207,41 @@ func TestAPIGameplayFlow(t *testing.T) {
 		t.Fatalf("expected confirmed claim with first-place winner, got %+v", validClaim)
 	}
 
+	playerAckResp := doRequestWithDevAuth(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/claims/"+validClaim.Claim.ID+"/acknowledge", map[string]any{
+		"decision": "approve",
+	}, "alex-gameplay@example.local", "Alex Gameplay", "player")
+	if playerAckResp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected player claim acknowledge 403, got %d: %s", playerAckResp.StatusCode, playerAckResp.Body)
+	}
+
+	mismatchedAckResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/claims/"+invalidClaim.Claim.ID+"/acknowledge", map[string]any{
+		"decision": "approve",
+	})
+	if mismatchedAckResp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected mismatched claim acknowledge 409, got %d: %s", mismatchedAckResp.StatusCode, mismatchedAckResp.Body)
+	}
+
+	rejectAckResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/claims/"+invalidClaim.Claim.ID+"/acknowledge", map[string]any{
+		"decision": "reject",
+		"note":     "Backend validation rejected the claim.",
+	})
+	if rejectAckResp.StatusCode != http.StatusCreated || stringFromData(t, rejectAckResp.Body, "type") != "claim.acknowledged" {
+		t.Fatalf("expected invalid claim acknowledge event, got %d: %s", rejectAckResp.StatusCode, rejectAckResp.Body)
+	}
+
+	approveAckResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/claims/"+validClaim.Claim.ID+"/acknowledge", map[string]any{
+		"decision": "approve",
+		"note":     "Winner order reviewed by host.",
+	})
+	if approveAckResp.StatusCode != http.StatusCreated || stringFromData(t, approveAckResp.Body, "type") != "claim.acknowledged" {
+		t.Fatalf("expected valid claim acknowledge event, got %d: %s", approveAckResp.StatusCode, approveAckResp.Body)
+	}
+
 	claimsResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/claims", nil)
 	if claimsResp.StatusCode != http.StatusOK {
 		t.Fatalf("expected claims list 200, got %d: %s", claimsResp.StatusCode, claimsResp.Body)
 	}
-	if claims := claimsFromData(t, claimsResp.Body); len(claims) != 2 {
+	if claims := claimsFromData(t, claimsResp.Body); len(claims) != 2 || claims[0].Status == "acknowledged" || claims[1].Status == "acknowledged" {
 		t.Fatalf("expected 2 claims, got %+v", claims)
 	}
 
@@ -1222,6 +1252,13 @@ func TestAPIGameplayFlow(t *testing.T) {
 	summary := summaryFromData(t, summaryResp.Body)
 	if summary.Status != "live" || summary.PlayerCount != 2 || summary.CalledWordCount != len(calledSet) || len(summary.Claims) != 2 || len(summary.Winners) != 1 {
 		t.Fatalf("unexpected summary: %+v", summary)
+	}
+	activityResp := doRequest(t, handler, http.MethodGet, "/api/v1/games/"+gameID+"/activity", nil)
+	if activityResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected activity 200, got %d: %s", activityResp.StatusCode, activityResp.Body)
+	}
+	if !hasActivityEventType(activityEventsFromData(t, activityResp.Body), "claim.acknowledged") {
+		t.Fatalf("expected claim.acknowledged activity, got %s", activityResp.Body)
 	}
 	if state := playerState(summary.Players, alexID); state != "confirmed_winner" {
 		t.Fatalf("expected Alex to be confirmed_winner, got %s", state)
@@ -2662,6 +2699,15 @@ func assertEventTypes(t *testing.T, events []apiGameEvent, expected []string) {
 			t.Fatalf("expected event type %s in %+v", eventType, events)
 		}
 	}
+}
+
+func hasActivityEventType(events []apiActivityEvent, eventType string) bool {
+	for _, event := range events {
+		if event.Type == eventType {
+			return true
+		}
+	}
+	return false
 }
 
 func readSSEEvents(t *testing.T, url string, lastEventID string, limit int) []apiGameEvent {

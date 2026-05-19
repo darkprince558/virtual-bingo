@@ -1,16 +1,19 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useMemo, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { motion } from 'motion/react'
 import { AppShell } from '@/components/AppShell'
 import { TopNav } from '@/components/TopNav'
 import { GameStatusBadge } from '@/components/GameStatusBadge'
+import { DecorativeBlobs } from '@/components/illustrations/DecorativeBlobs'
+import { BingoCharacter } from '@/components/illustrations/BingoCharacter'
 import { Users, ArrowRight, Clock, Shield } from 'lucide-react'
 import { apiClient } from '@/lib/apiClient'
+import { mapGameStatus } from '@/lib/uiMappers'
 import { useGameEvents } from '@/hooks/useGameEvents'
-import type { GameRunResponse, PlayerResponse, HostSnapshotResponse } from '@/types/api'
+import type { GameRunResponse, PlayerResponse, PlayerSnapshotResponse } from '@/types/api'
 
 function getInitials(name: string) {
   return name.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase()
@@ -37,12 +40,12 @@ function LobbyContent() {
   const searchParams = useSearchParams()
   const code = searchParams.get('code')
   const name = searchParams.get('name') || 'Player'
+  const emailParam = searchParams.get('email')
 
   const [game, setGame] = useState<GameRunResponse | null>(null)
   const [player, setPlayer] = useState<PlayerResponse | null>(null)
   const [joined, setJoined] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [hostName, setHostName] = useState('Host')
   const [connectedPlayers, setConnectedPlayers] = useState<PlayerResponse[]>([])
 
   useEffect(() => {
@@ -65,12 +68,14 @@ function LobbyContent() {
   const handleJoin = async () => {
     if (!game) return
     try {
-      const email = `${name.replace(/\s+/g, '').toLowerCase()}@example.com`
+      const emailLocalPart = name.trim().split(/\s+/)[0]?.toLowerCase().replace(/[^a-z0-9._-]/g, '') || 'player'
+      const email = emailParam || `${emailLocalPart}@example.local`
       const joinedPlayer = await apiClient<PlayerResponse>(`/games/${game.id}/players`, {
         method: 'POST',
         body: JSON.stringify({ displayName: name, email })
       })
       setPlayer(joinedPlayer)
+      setConnectedPlayers([joinedPlayer])
       setJoined(true)
     } catch (err: any) {
       setError(err.message || 'Failed to join game')
@@ -78,29 +83,31 @@ function LobbyContent() {
   }
 
   // Poll for game start if joined using events
-  const devAuth = player ? {
+  const devAuth = useMemo(() => player ? {
     devUserEmail: player.email,
     devUserName: player.displayName,
     devUserRole: 'player'
-  } : {}
+  } : {}, [player])
   const { lastEvent } = useGameEvents(joined && game ? game.id : null, devAuth)
 
   useEffect(() => {
     async function checkStatus() {
       if (!game || !player) return
       try {
-        const snapshot = await apiClient<any>(`/games/${game.id}/player-snapshot`, devAuth)
-        setConnectedPlayers(snapshot.players || [])
+        const snapshot = await apiClient<PlayerSnapshotResponse>(`/games/${game.id}/players/${player.id}/snapshot`, devAuth)
+        setConnectedPlayers([snapshot.player])
         if (snapshot.gameRun.status === 'live') {
           router.push(`/play?gameId=${game.id}&playerId=${player.id}`)
         }
-      } catch (e) {}
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to refresh lobby status')
+      }
     }
 
     if (joined) {
       checkStatus()
     }
-  }, [joined, game, player, lastEvent, router])
+  }, [joined, game, player, lastEvent, router, devAuth])
 
   if (error) {
     return (
@@ -126,20 +133,33 @@ function LobbyContent() {
 
   return (
     <AppShell>
-      <TopNav gameCode={game.code} playerName={name} role="player" status="Waiting" />
+      <TopNav gameCode={game.code} playerName={name} role="player" status={mapGameStatus(game.status)} />
 
-      <main className="flex-1 flex items-center justify-center p-4 sm:p-8">
-        <div className="w-full max-w-2xl">
+      <main className="flex-1 flex items-center justify-center p-4 sm:p-8 relative">
+        {/* Animated background blobs */}
+        <DecorativeBlobs variant="lobby" />
 
-          {/* Header */}
+        <div className="w-full max-w-2xl relative z-10">
+
+          {/* Header with character */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
             className="text-center mb-8"
           >
+            {/* Waiting character illustration */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              transition={{ delay: 0.2, type: 'spring' }}
+              className="flex justify-center mb-4"
+            >
+              <BingoCharacter mood="waiting" size={80} />
+            </motion.div>
+
             <div className="flex items-center justify-center gap-3 mb-4">
-              <GameStatusBadge status="Waiting" />
+              <GameStatusBadge status={mapGameStatus(game.status)} />
             </div>
             <h1 className="text-4xl sm:text-5xl font-black tracking-tight mb-3" style={{ color: '#1C1917' }}>
               Game Lobby
@@ -154,7 +174,7 @@ function LobbyContent() {
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.1 }}
-            className="rounded-3xl p-6 sm:p-8 mb-5"
+            className="rounded-xl p-6 sm:p-8 mb-5"
             style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 4px 24px rgba(0,0,0,0.05)' }}
           >
             <div className="flex flex-col sm:flex-row items-center gap-6">
@@ -162,7 +182,7 @@ function LobbyContent() {
               <div className="flex flex-col items-center gap-2">
                 <p className="text-[10px] font-extrabold uppercase tracking-widest" style={{ color: '#A8A29E' }}>Game Code</p>
                 <div
-                  className="px-8 py-4 rounded-2xl"
+                  className="px-8 py-4 rounded-xl"
                   style={{ background: '#FFF4F0', border: '2px solid #FFE4D9' }}
                 >
                   <span className="text-3xl font-black tracking-[0.2em]" style={{ color: '#FF5A1F', letterSpacing: '0.2em' }}>
@@ -195,7 +215,7 @@ function LobbyContent() {
             initial={{ opacity: 0, y: 24 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.2 }}
-            className="rounded-3xl p-6 mb-5"
+            className="rounded-xl p-6 mb-5"
             style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 4px 24px rgba(0,0,0,0.05)' }}
           >
             <div className="flex items-center gap-2 mb-5">
@@ -221,7 +241,7 @@ function LobbyContent() {
                     <motion.div
                       animate={{ y: [0, -5, 0] }}
                       transition={{ duration: 2.5 + i * 0.3, repeat: Infinity, ease: 'easeInOut', delay: i * 0.2 }}
-                      className="w-12 h-12 rounded-2xl flex items-center justify-center text-sm font-black"
+                      className="w-12 h-12 rounded-xl flex items-center justify-center text-sm font-black"
                       style={{ background: color.bg, border: `2px solid ${color.border}`, color: color.text }}
                     >
                       {getInitials(p.displayName || p.name)}
@@ -243,7 +263,7 @@ function LobbyContent() {
                   style={{ minWidth: '64px' }}
                 >
                   <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center text-sm font-black"
+                    className="w-12 h-12 rounded-xl flex items-center justify-center text-sm font-black"
                     style={{ background: '#F4F2EF', border: '2px dashed #D6D3D1', color: '#78716C' }}
                   >
                     +{TOTAL_CONNECTED - VISIBLE_PLAYERS.length}
@@ -264,10 +284,10 @@ function LobbyContent() {
               <div className="flex flex-col sm:flex-row gap-3">
                 <motion.button
                   whileTap={{ scale: 0.97 }}
-                  whileHover={{ scale: 1.02 }}
+                  whileHover={{ scale: 1.02, y: -2 }}
                   onClick={handleJoin}
                   id="confirmJoinBtn"
-                  className="flex-1 flex items-center justify-center gap-2 py-4 rounded-2xl font-extrabold text-base transition-all"
+                  className="flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-extrabold text-base transition-all"
                   style={{
                     background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)',
                     color: '#FFFFFF',
@@ -275,11 +295,11 @@ function LobbyContent() {
                   }}
                 >
                   <Clock className="w-5 h-5" />
-                  I&apos;m Ready — Waiting for Host
+                  I&apos;m Ready - Waiting for Host
                 </motion.button>
                 <Link
                   href="/"
-                  className="flex items-center justify-center px-6 py-4 rounded-2xl font-bold text-sm transition-all"
+                  className="flex items-center justify-center px-6 py-4 rounded-xl font-bold text-sm transition-all"
                   style={{ background: '#F4F2EF', color: '#78716C' }}
                 >
                   Leave
@@ -292,16 +312,32 @@ function LobbyContent() {
                 transition={{ type: 'spring', stiffness: 300, damping: 22 }}
                 className="flex flex-col gap-3"
               >
+                {/* Breathing waiting indicator */}
                 <div
-                  className="flex items-center justify-center gap-3 py-4 rounded-2xl"
+                  className="flex flex-col items-center justify-center gap-4 py-6 rounded-xl relative overflow-hidden"
                   style={{ background: '#EDFAF5', border: '1.5px solid #A8EBCC' }}
                 >
-                  <motion.div
-                    animate={{ scale: [1, 1.1, 1] }}
-                    transition={{ duration: 2, repeat: Infinity }}
-                    className="w-3 h-3 rounded-full"
-                    style={{ background: '#22AA6A' }}
-                  />
+                  {/* Breathing rings */}
+                  <div className="relative w-12 h-12 flex items-center justify-center">
+                    <motion.div
+                      className="absolute rounded-full"
+                      style={{ width: 48, height: 48, border: '2px solid #22AA6A', opacity: 0.3 }}
+                      animate={{ scale: [1, 1.6, 1], opacity: [0.3, 0.05, 0.3] }}
+                      transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                    />
+                    <motion.div
+                      className="absolute rounded-full"
+                      style={{ width: 48, height: 48, border: '2px solid #22AA6A', opacity: 0.2 }}
+                      animate={{ scale: [1, 1.6, 1], opacity: [0.2, 0.05, 0.2] }}
+                      transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut', delay: 1 }}
+                    />
+                    <motion.div
+                      animate={{ scale: [1, 1.15, 1] }}
+                      transition={{ duration: 3, repeat: Infinity }}
+                      className="w-4 h-4 rounded-full"
+                      style={{ background: '#22AA6A' }}
+                    />
+                  </div>
                   <span className="font-extrabold" style={{ color: '#116B3F' }}>
                     Ready! Waiting for the host to start…
                   </span>
@@ -309,7 +345,7 @@ function LobbyContent() {
                 <button
                   disabled
                   id="goToGameBtn"
-                  className="flex items-center justify-center gap-2 py-3 rounded-2xl text-sm font-bold transition-all"
+                  className="flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-bold transition-all"
                   style={{
                     background: '#1C1917',
                     color: '#FFFFFF',

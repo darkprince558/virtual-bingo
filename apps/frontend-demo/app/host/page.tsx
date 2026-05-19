@@ -6,7 +6,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { DashboardShell } from '@/components/DashboardShell'
 import { apiClient } from '@/lib/apiClient'
-import type { GameRunResponse } from '@/types/api'
+import { displayBackendValue } from '@/lib/uiMappers'
+import type { AllowedPlayerResponse, GameRunResponse, GameSettingsResponse, WordSetResponse } from '@/types/api'
 import { mockGameTemplates, mockWordSet } from '@/lib/mockAdminData'
 import {
   CalendarClock,
@@ -16,8 +17,6 @@ import {
   Users,
   Play,
   Clock,
-  Plus,
-  ArrowRight,
   CheckCircle2,
   AlertCircle,
   Zap,
@@ -35,31 +34,29 @@ const RUN_STATUS_STYLES: Record<string, { bg: string; color: string; dot: string
   'Failed':              { bg: '#FFE4E6', color: '#BE123C', dot: '#F43F5E' },
 }
 
-function formatRelativeDate(dateStr: string) {
-  const d = new Date(dateStr)
-  const now = new Date()
-  const diff = d.getTime() - now.getTime()
-  const days = Math.round(diff / 86400000)
-  if (days === 0) return 'Today'
-  if (days === 1) return 'Tomorrow'
-  if (days === -1) return 'Yesterday'
-  if (days > 0) return `In ${days} days`
-  return `${Math.abs(days)} days ago`
-}
-
 export default function HostDashboardPage() {
   const router = useRouter()
   const [runs, setRuns] = useState<GameRunResponse[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isCreating, setIsCreating] = useState(false)
+  const [apiError, setApiError] = useState<string | null>(null)
+  const [setupGameForm, setSetupGameForm] = useState({ name: '', code: '', winningPattern: 'single_line', wordSetId: '' })
+  const [setupSettingsForm, setSetupSettingsForm] = useState({ markingMode: 'manual', allowPlayerMarkingModeChoice: false, showClaimReadiness: true })
+  const [wordSets, setWordSets] = useState<WordSetResponse[]>([])
+  const [allowedPlayers, setAllowedPlayers] = useState<AllowedPlayerResponse[]>([])
+  const [newPlayersText, setNewPlayersText] = useState('')
+  const [setupNotice, setSetupNotice] = useState<string | null>(null)
+  const [isSavingSetup, setIsSavingSetup] = useState(false)
 
   useEffect(() => {
     async function loadGames() {
       try {
         const data = await apiClient<GameRunResponse[]>('/games')
         setRuns(data)
+        setApiError(null)
       } catch (err) {
         console.error('Failed to load games:', err)
+        setApiError(err instanceof Error ? err.message : 'Failed to load games from the Go backend')
       } finally {
         setIsLoading(false)
       }
@@ -80,6 +77,7 @@ export default function HostDashboardPage() {
       router.push(`/host/live?gameId=${newGame.id}`)
     } catch (err) {
       console.error('Failed to start game:', err)
+      setApiError(err instanceof Error ? err.message : 'Failed to create a quick game')
       setIsCreating(false)
     }
   }
@@ -88,6 +86,108 @@ export default function HostDashboardPage() {
   const upcomingRuns = runs.filter(r => ['pending', 'scheduled'].includes(r.status.toLowerCase()))
   const liveRuns = runs.filter(r => ['live', 'paused'].includes(r.status.toLowerCase()))
   const recentRuns = runs.filter(r => ['finished', 'cancelled'].includes(r.status.toLowerCase())).slice(0, 3)
+  const setupRun = upcomingRuns[0] || liveRuns[0] || runs[0]
+
+  useEffect(() => {
+    if (!setupRun) return
+
+    let cancelled = false
+
+    async function loadSetup() {
+      try {
+        const [settings, sets, allowed] = await Promise.all([
+          apiClient<GameSettingsResponse>(`/games/${setupRun.id}/settings`, { devUserRole: 'host' }),
+          apiClient<WordSetResponse[]>('/word-sets', { devUserRole: 'host' }),
+          apiClient<AllowedPlayerResponse[]>(`/games/${setupRun.id}/allowed-players`, { devUserRole: 'host' }),
+        ])
+        if (!cancelled) {
+          setSetupGameForm({
+            name: setupRun.name,
+            code: setupRun.code,
+            winningPattern: setupRun.winningPattern || 'single_line',
+            wordSetId: setupRun.wordSetId || '',
+          })
+          setSetupSettingsForm({
+            markingMode: settings.markingMode,
+            allowPlayerMarkingModeChoice: settings.allowPlayerMarkingModeChoice,
+            showClaimReadiness: settings.showClaimReadiness,
+          })
+          setWordSets(sets)
+          setAllowedPlayers(allowed)
+        }
+      } catch (err) {
+        console.error('Failed to load setup data:', err)
+      }
+    }
+
+    void loadSetup()
+
+    return () => {
+      cancelled = true
+    }
+  }, [setupRun])
+
+  const refreshGames = async () => {
+    const data = await apiClient<GameRunResponse[]>('/games')
+    setRuns(data)
+  }
+
+  const handleSaveSetup = async () => {
+    if (!setupRun) return
+    setIsSavingSetup(true)
+    setSetupNotice(null)
+    try {
+      await apiClient<GameRunResponse>(`/games/${setupRun.id}`, {
+        method: 'PATCH',
+        devUserRole: 'host',
+        body: JSON.stringify({
+          name: setupGameForm.name,
+          code: setupGameForm.code,
+          winningPattern: setupGameForm.winningPattern,
+          wordSetId: setupGameForm.wordSetId || undefined,
+        })
+      })
+      await apiClient<GameSettingsResponse>(`/games/${setupRun.id}/settings`, {
+        method: 'PATCH',
+        devUserRole: 'host',
+        body: JSON.stringify(setupSettingsForm)
+      })
+      await refreshGames()
+      setSetupNotice('Game setup saved.')
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Failed to save game setup')
+    } finally {
+      setIsSavingSetup(false)
+    }
+  }
+
+  const handleAddPlayers = async () => {
+    if (!setupRun || !newPlayersText.trim()) return
+    setIsSavingSetup(true)
+    try {
+      const players = newPlayersText.split('\n').map(line => {
+        const [first, second] = line.split(',').map(part => part.trim())
+        const email = second || first
+        return {
+          email,
+          displayName: second ? first : email.split('@')[0].replace(/[._-]+/g, ' '),
+        }
+      }).filter(player => player.email.includes('@'))
+      const allowed = await apiClient<AllowedPlayerResponse[]>(`/games/${setupRun.id}/allowed-players/bulk`, {
+        method: 'POST',
+        devUserRole: 'host',
+        body: JSON.stringify(players),
+      })
+      setAllowedPlayers(allowed)
+      setNewPlayersText('')
+      setSetupNotice(`${allowed.length} allowed player${allowed.length === 1 ? '' : 's'} saved.`)
+      await refreshGames()
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Failed to add allowed players')
+    } finally {
+      setIsSavingSetup(false)
+    }
+  }
 
   return (
     <DashboardShell role="host" userName="Admin Team">
@@ -111,6 +211,13 @@ export default function HostDashboardPage() {
           </p>
         </motion.div>
 
+        {apiError && (
+          <div className="mb-6 rounded-xl p-5" style={{ background: '#FFF1F2', border: '1.5px solid #FECDD3', color: '#BE123C' }}>
+            <p className="text-sm font-extrabold mb-1">Backend connection issue</p>
+            <p className="text-sm font-semibold">{apiError}</p>
+          </div>
+        )}
+
         {/* Quick stats row */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -122,18 +229,18 @@ export default function HostDashboardPage() {
             { icon: CalendarClock, label: 'Active Templates', value: activeTemplates.length, color: '#FF5A1F', bg: '#FFF4F0' },
             { icon: Radio, label: 'Live Now', value: liveRuns.length, color: '#22AA6A', bg: '#EDFAF5' },
             { icon: Clock, label: 'Upcoming', value: upcomingRuns.length, color: '#7C5CFC', bg: '#F5F2FF' },
-            { icon: Sparkles, label: 'Needs Review', value: 1, color: '#F59E0B', bg: '#FFFBEB' },
+            { icon: Sparkles, label: 'Needs Review', value: setupRun ? 1 : 0, color: '#F59E0B', bg: '#FFFBEB' },
           ].map((stat, i) => (
             <motion.div
               key={stat.label}
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.1 + i * 0.05 }}
-              className="rounded-3xl p-4 sm:p-5 flex flex-col gap-3"
+              className="rounded-xl p-4 sm:p-5 flex flex-col gap-3"
               style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 12px rgba(0,0,0,0.04)' }}
             >
               <div
-                className="w-10 h-10 rounded-2xl flex items-center justify-center"
+                className="w-10 h-10 rounded-lg flex items-center justify-center"
                 style={{ background: stat.bg }}
               >
                 <stat.icon className="w-5 h-5" style={{ color: stat.color }} />
@@ -160,8 +267,8 @@ export default function HostDashboardPage() {
                 transition={{ delay: 0.15 }}
               >
                 <Link
-                  href="/host/live"
-                  className="block rounded-3xl p-5 sm:p-6 transition-all group"
+                  href={`/host/live?gameId=${liveRuns[0].id}`}
+                  className="block rounded-xl p-5 sm:p-6 transition-all group"
                   style={{
                     background: 'linear-gradient(135deg, #EDFAF5 0%, #D5F5E6 100%)',
                     border: '1.5px solid #A8EBCC',
@@ -199,8 +306,8 @@ export default function HostDashboardPage() {
               transition={{ delay: 0.2 }}
             >
               <Link
-                href="/host/review"
-                className="block rounded-3xl p-5 transition-all group"
+                href={setupRun ? `/host/review?gameId=${setupRun.id}` : '/host'}
+                className="block rounded-xl p-5 transition-all group"
                 style={{
                   background: 'linear-gradient(135deg, #FFFBEB 0%, #FEF3C7 100%)',
                   border: '1.5px solid #FDE68A',
@@ -208,20 +315,20 @@ export default function HostDashboardPage() {
               >
                 <div className="flex items-center gap-4">
                   <div
-                    className="w-12 h-12 rounded-2xl flex items-center justify-center shrink-0"
+                    className="w-12 h-12 rounded-lg flex items-center justify-center shrink-0"
                     style={{ background: 'linear-gradient(135deg, #FBBF24, #F59E0B)', boxShadow: '0 4px 12px rgba(245,158,11,0.25)' }}
                   >
                     <Sparkles className="w-6 h-6 text-white" />
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
-                      <h3 className="text-sm font-extrabold" style={{ color: '#92400E' }}>AI Content Needs Review</h3>
+                      <h3 className="text-sm font-extrabold" style={{ color: '#92400E' }}>{setupRun ? 'AI Content Needs Review' : 'Create a Game for AI Content'}</h3>
                       <span className="text-[10px] font-black px-2 py-0.5 rounded-full" style={{ background: '#FDE68A', color: '#B45309' }}>
                         1 pending
                       </span>
                     </div>
                     <p className="text-xs font-semibold truncate" style={{ color: '#B45309' }}>
-                      {mockWordSet.words.length} words generated for &ldquo;{mockWordSet.templateName}&rdquo; &mdash; tap to review &amp; approve.
+                      {setupRun ? `${mockWordSet.words.length} words can be generated for "${setupRun.name}" - tap to prepare, review, and lock.` : 'Quick start a real backend game before running AI prep.'}
                     </p>
                   </div>
                   <ChevronRight className="w-5 h-5 shrink-0 transition-transform group-hover:translate-x-1" style={{ color: '#D97706' }} />
@@ -234,7 +341,7 @@ export default function HostDashboardPage() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.25 }}
-              className="rounded-3xl p-5 sm:p-6"
+              className="rounded-xl p-5 sm:p-6"
               style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}
             >
               <div className="flex items-center justify-between mb-5">
@@ -247,23 +354,24 @@ export default function HostDashboardPage() {
               </div>
               {upcomingRuns.length === 0 ? (
                 <p className="text-sm font-semibold text-center py-8" style={{ color: '#A8A29E' }}>
-                  No upcoming runs. Create a template to get started.
+                  {isLoading ? 'Loading runs...' : 'No upcoming runs. Create a template to get started.'}
                 </p>
               ) : (
                 <div className="space-y-3">
                   {upcomingRuns.map((run, i) => {
-                    const style = RUN_STATUS_STYLES[run.status] || RUN_STATUS_STYLES['Scheduled']
+                    const displayStatus = displayBackendValue(run.status)
+                    const style = RUN_STATUS_STYLES[displayStatus] || RUN_STATUS_STYLES['Scheduled']
                     return (
                       <motion.div
                         key={run.id}
                         initial={{ opacity: 0, x: -12 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: 0.3 + i * 0.06 }}
-                        className="flex items-center gap-4 px-4 py-3.5 rounded-2xl"
+                        className="flex items-center gap-4 px-4 py-3.5 rounded-lg"
                         style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8' }}
                       >
                         <div
-                          className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+                          className="w-10 h-10 rounded-md flex items-center justify-center shrink-0"
                           style={{ background: style.bg }}
                         >
                           <CalendarClock className="w-5 h-5" style={{ color: style.color }} />
@@ -278,7 +386,7 @@ export default function HostDashboardPage() {
                           className="text-[10px] font-extrabold px-2.5 py-1 rounded-full uppercase tracking-wide shrink-0"
                           style={{ background: style.bg, color: style.color }}
                         >
-                          {run.status}
+                          {displayStatus}
                         </span>
                       </motion.div>
                     )
@@ -296,7 +404,7 @@ export default function HostDashboardPage() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.15 }}
-              className="rounded-3xl p-5"
+              className="rounded-xl p-5"
               style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}
             >
               <h2 className="text-sm font-extrabold uppercase tracking-widest mb-4" style={{ color: '#A8A29E' }}>
@@ -306,10 +414,10 @@ export default function HostDashboardPage() {
                 <button
                   onClick={handleQuickStart}
                   disabled={isCreating}
-                  className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all group"
+                  className="w-full flex items-center gap-3 px-4 py-3.5 rounded-lg transition-all group"
                   style={{ background: '#FFF4F0', border: '1.5px solid #FFE4D9', opacity: isCreating ? 0.7 : 1 }}
                 >
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                  <div className="w-9 h-9 rounded-md flex items-center justify-center shrink-0"
                     style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)', boxShadow: '0 4px 10px rgba(255,90,31,0.25)' }}
                   >
                     <Zap className="w-4 h-4 text-white" />
@@ -323,31 +431,158 @@ export default function HostDashboardPage() {
                   <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1 shrink-0" style={{ color: '#FF5A1F' }} />
                 </button>
 
-                <Link
-                  href="/host/live"
-                  className="flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all group"
-                  style={{ background: '#EDFAF5', border: '1.5px solid #A8EBCC' }}
-                >
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center"
-                    style={{ background: 'linear-gradient(135deg, #3DC484, #22AA6A)', boxShadow: '0 4px 10px rgba(34,170,106,0.25)' }}
+                {liveRuns[0] ? (
+                  <Link
+                    href={`/host/live?gameId=${liveRuns[0].id}`}
+                    className="flex items-center gap-3 px-4 py-3.5 rounded-lg transition-all group"
+                    style={{ background: '#EDFAF5', border: '1.5px solid #A8EBCC' }}
                   >
-                    <Radio className="w-4 h-4 text-white" />
+                    <div className="w-9 h-9 rounded-md flex items-center justify-center"
+                      style={{ background: 'linear-gradient(135deg, #3DC484, #22AA6A)', boxShadow: '0 4px 10px rgba(34,170,106,0.25)' }}
+                    >
+                      <Radio className="w-4 h-4 text-white" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold" style={{ color: '#0D512F' }}>Live Game Control</p>
+                      <p className="text-[10px] font-semibold" style={{ color: '#22AA6A' }}>Manage active session</p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" style={{ color: '#22AA6A' }} />
+                  </Link>
+                ) : (
+                  <div
+                    className="flex items-center gap-3 px-4 py-3.5 rounded-lg"
+                    style={{ background: '#F4F2EF', border: '1.5px solid #E7E5E4', opacity: 0.78 }}
+                  >
+                    <div className="w-9 h-9 rounded-md flex items-center justify-center" style={{ background: '#E7E5E4' }}>
+                      <Radio className="w-4 h-4" style={{ color: '#A8A29E' }} />
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm font-bold" style={{ color: '#78716C' }}>No live game selected</p>
+                      <p className="text-[10px] font-semibold" style={{ color: '#A8A29E' }}>Quick start a game first</p>
+                    </div>
                   </div>
-                  <div className="flex-1">
-                    <p className="text-sm font-bold" style={{ color: '#0D512F' }}>Live Game Control</p>
-                    <p className="text-[10px] font-semibold" style={{ color: '#22AA6A' }}>Manage active session</p>
-                  </div>
-                  <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" style={{ color: '#22AA6A' }} />
-                </Link>
+                )}
               </div>
             </motion.div>
+
+            {setupRun && (
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                className="rounded-xl p-5"
+                style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-sm font-extrabold uppercase tracking-widest" style={{ color: '#A8A29E' }}>
+                    Game Setup
+                  </h2>
+                  <Link href={`/host/review?gameId=${setupRun.id}`} className="text-xs font-bold flex items-center gap-1" style={{ color: '#FF5A1F' }}>
+                    AI Review <ChevronRight className="w-3.5 h-3.5" />
+                  </Link>
+                </div>
+
+                {setupNotice && (
+                  <p className="mb-3 rounded-lg px-3 py-2 text-xs font-bold" style={{ background: '#EDFAF5', color: '#116B3F' }}>{setupNotice}</p>
+                )}
+
+                <div className="space-y-3">
+                  <input
+                    value={setupGameForm.name}
+                    onChange={e => setSetupGameForm(prev => ({ ...prev, name: e.target.value }))}
+                    className="w-full px-3 py-2.5 rounded-lg text-sm font-bold outline-none"
+                    style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#1C1917' }}
+                    aria-label="Game name"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      value={setupGameForm.code}
+                      onChange={e => setSetupGameForm(prev => ({ ...prev, code: e.target.value.toUpperCase() }))}
+                      className="px-3 py-2.5 rounded-lg text-sm font-bold outline-none"
+                      style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#1C1917' }}
+                      aria-label="Game code"
+                    />
+                    <select
+                      value={setupGameForm.winningPattern}
+                      onChange={e => setSetupGameForm(prev => ({ ...prev, winningPattern: e.target.value }))}
+                      className="px-3 py-2.5 rounded-lg text-sm font-bold outline-none"
+                      style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#1C1917' }}
+                      aria-label="Winning pattern"
+                    >
+                      <option value="single_line">Single Line</option>
+                      <option value="four_corners">Four Corners</option>
+                      <option value="full_house">Full House</option>
+                    </select>
+                  </div>
+                  <select
+                    value={setupGameForm.wordSetId}
+                    onChange={e => setSetupGameForm(prev => ({ ...prev, wordSetId: e.target.value }))}
+                    className="w-full px-3 py-2.5 rounded-lg text-sm font-bold outline-none"
+                    style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#1C1917' }}
+                    aria-label="Word set"
+                  >
+                    <option value="">Use generated/assigned word set</option>
+                    {wordSets.map(wordSet => (
+                      <option key={wordSet.id} value={wordSet.id}>{wordSet.name}</option>
+                    ))}
+                  </select>
+                  <div className="grid grid-cols-2 gap-2">
+                    <select
+                      value={setupSettingsForm.markingMode}
+                      onChange={e => setSetupSettingsForm(prev => ({ ...prev, markingMode: e.target.value }))}
+                      className="px-3 py-2.5 rounded-lg text-sm font-bold outline-none"
+                      style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#1C1917' }}
+                      aria-label="Marking mode"
+                    >
+                      <option value="manual">Manual</option>
+                      <option value="assist">Assist</option>
+                      <option value="auto_mark">Auto Mark</option>
+                    </select>
+                    <label className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-bold" style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#78716C' }}>
+                      <input
+                        type="checkbox"
+                        checked={setupSettingsForm.showClaimReadiness}
+                        onChange={e => setSetupSettingsForm(prev => ({ ...prev, showClaimReadiness: e.target.checked }))}
+                      />
+                      Readiness
+                    </label>
+                  </div>
+                  <label className="flex items-center gap-2 px-3 py-2.5 rounded-lg text-xs font-bold" style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#78716C' }}>
+                    <input
+                      type="checkbox"
+                      checked={setupSettingsForm.allowPlayerMarkingModeChoice}
+                      onChange={e => setSetupSettingsForm(prev => ({ ...prev, allowPlayerMarkingModeChoice: e.target.checked }))}
+                    />
+                    Allow player marking mode choice
+                  </label>
+                  <button onClick={handleSaveSetup} disabled={isSavingSetup} className="w-full py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FFF4F0', color: '#C23208', opacity: isSavingSetup ? 0.65 : 1 }}>
+                    {isSavingSetup ? 'Saving...' : 'Save Game Setup'}
+                  </button>
+                </div>
+
+                <div className="mt-5 pt-4" style={{ borderTop: '1px solid #F4F2EF' }}>
+                  <p className="text-xs font-extrabold mb-2" style={{ color: '#A8A29E' }}>Allowed Players ({allowedPlayers.length})</p>
+                  <textarea
+                    value={newPlayersText}
+                    onChange={e => setNewPlayersText(e.target.value)}
+                    rows={3}
+                    placeholder="Alex Demo, alex@example.local"
+                    className="w-full px-3 py-2.5 rounded-lg text-sm font-bold outline-none resize-none"
+                    style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#1C1917' }}
+                  />
+                  <button onClick={handleAddPlayers} disabled={isSavingSetup || !newPlayersText.trim()} className="mt-2 w-full py-3 rounded-lg text-sm font-extrabold" style={{ background: '#EDFAF5', color: '#116B3F', opacity: isSavingSetup || !newPlayersText.trim() ? 0.55 : 1 }}>
+                    Add Allowed Players
+                  </button>
+                </div>
+              </motion.div>
+            )}
 
             {/* Active templates */}
             <motion.div
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.25 }}
-              className="rounded-3xl p-5"
+              className="rounded-xl p-5"
               style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}
             >
               <div className="flex items-center justify-between mb-4">
@@ -369,11 +604,11 @@ export default function HostDashboardPage() {
                     initial={{ opacity: 0, x: -12 }}
                     animate={{ opacity: 1, x: 0 }}
                     transition={{ delay: 0.3 + i * 0.06 }}
-                    className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+                    className="flex items-center gap-3 px-4 py-3 rounded-lg"
                     style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8' }}
                   >
                     <div
-                      className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0 text-xs font-black"
+                      className="w-9 h-9 rounded-md flex items-center justify-center shrink-0 text-xs font-black"
                       style={{
                         background: tmpl.isActive ? 'linear-gradient(135deg, #FF7A42, #FF5A1F)' : '#E7E5E4',
                         color: tmpl.isActive ? '#FFFFFF' : '#A8A29E',
@@ -406,7 +641,7 @@ export default function HostDashboardPage() {
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.35 }}
-              className="rounded-3xl p-5"
+              className="rounded-xl p-5"
               style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}
             >
               <h2 className="text-sm font-extrabold uppercase tracking-widest mb-4" style={{ color: '#A8A29E' }}>
@@ -414,17 +649,19 @@ export default function HostDashboardPage() {
               </h2>
               <div className="space-y-3">
                 {recentRuns.map((run, i) => {
-                  const style = RUN_STATUS_STYLES[run.status] || RUN_STATUS_STYLES['Complete']
+                  const displayStatus = displayBackendValue(run.status)
+                  const style = RUN_STATUS_STYLES[displayStatus] || RUN_STATUS_STYLES['Complete']
                   return (
-                    <div
+                    <Link
                       key={run.id}
-                      className="flex items-center gap-3 px-4 py-3 rounded-2xl"
+                      href={`/summary?gameId=${run.id}`}
+                      className="flex items-center gap-3 px-4 py-3 rounded-lg"
                       style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8' }}
                     >
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                      <div className="w-9 h-9 rounded-md flex items-center justify-center shrink-0"
                         style={{ background: style.bg }}
                       >
-                        {run.status === 'Complete' ? (
+                        {displayStatus === 'Complete' || displayStatus === 'Finished' ? (
                           <CheckCircle2 className="w-4 h-4" style={{ color: style.color }} />
                         ) : (
                           <AlertCircle className="w-4 h-4" style={{ color: style.color }} />
@@ -436,7 +673,7 @@ export default function HostDashboardPage() {
                           Code: {run.code}
                         </p>
                       </div>
-                    </div>
+                    </Link>
                   )
                 })}
               </div>

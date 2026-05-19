@@ -2508,6 +2508,15 @@ type SubmitBingoClaimTxParams struct {
 	Validate         func(ClaimValidationData) (ClaimValidationDecision, error)
 }
 
+type AcknowledgeBingoClaimTxParams struct {
+	GameRunID   string
+	ClaimID     string
+	Status      string
+	Decision    string
+	Note        string
+	ActorUserID *string
+}
+
 type SubmitBingoClaimTxResult struct {
 	Claim  domain.BingoClaim
 	Winner *domain.Winner
@@ -2669,6 +2678,59 @@ func (s *Store) SubmitBingoClaimTx(ctx context.Context, params SubmitBingoClaimT
 	}
 
 	return result, nil
+}
+
+func (s *Store) AcknowledgeBingoClaimTx(ctx context.Context, params AcknowledgeBingoClaimTxParams) (domain.GameEvent, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return domain.GameEvent{}, mapWriteError(err)
+	}
+	defer tx.Rollback(ctx)
+
+	claimRow := tx.QueryRow(ctx, `
+		SELECT id::text, game_run_id::text, player_id::text, pattern, status, validation_result, claimed_at, reviewed_by_user_id::text, reviewed_at, created_at, updated_at
+		FROM bingo_claims
+		WHERE id = $1
+		FOR UPDATE
+	`, params.ClaimID)
+	claim, err := scanBingoClaim(claimRow)
+	if err != nil {
+		return domain.GameEvent{}, mapWriteError(err)
+	}
+	if claim.GameRunID != params.GameRunID {
+		return domain.GameEvent{}, ErrNotFound
+	}
+
+	payload := map[string]any{
+		"claimId":  claim.ID,
+		"playerId": claim.PlayerID,
+		"status":   params.Status,
+		"decision": params.Decision,
+	}
+	if params.Note != "" {
+		payload["note"] = params.Note
+	}
+
+	event, err := insertOutboxEventInTx(ctx, tx, params.GameRunID, "claim.acknowledged", &claim.ID, payload)
+	if err != nil {
+		return domain.GameEvent{}, err
+	}
+	if err := recordAuditEventInTx(ctx, tx, audit.Event{
+		GameRunID:   &params.GameRunID,
+		ActorUserID: params.ActorUserID,
+		EventType:   "claim.acknowledged",
+		EntityType:  "bingo_claim",
+		EntityID:    &claim.ID,
+		Payload:     payload,
+	}); err != nil {
+		return domain.GameEvent{}, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return domain.GameEvent{}, mapWriteError(err)
+	}
+
+	return event, nil
 }
 
 type CreateWinnerParams struct {

@@ -242,6 +242,11 @@ func (s *Server) dispatchGameRoute(w http.ResponseWriter, r *http.Request) {
 			s.getBingoClaim(w, r)
 			return
 		}
+		if len(segments) == 4 && segments[3] == "acknowledge" && r.Method == http.MethodPost {
+			r.SetPathValue("claimID", segments[2])
+			s.acknowledgeBingoClaim(w, r)
+			return
+		}
 	case "summary":
 		if r.Method == http.MethodGet && len(segments) == 2 {
 			s.getGameSummary(w, r)

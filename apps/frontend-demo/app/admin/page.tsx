@@ -41,8 +41,8 @@ export default function AdminDashboard() {
             { icon: Mic, label: 'Voice Pending', value: stats.pendingVoiceApprovals, color: '#E8440A', bg: '#FFF4F0' },
             { icon: Gift, label: 'Rewards Sent', value: stats.rewardsFulfilled, color: '#22AA6A', bg: '#EDFAF5' },
           ].map((s, i) => (
-            <motion.div key={s.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 + i * 0.04 }} className="rounded-2xl p-4 flex flex-col items-center gap-2" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 12px rgba(0,0,0,0.03)' }}>
-              <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: s.bg }}><s.icon className="w-4 h-4" style={{ color: s.color }} /></div>
+            <motion.div key={s.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 + i * 0.04 }} className="rounded-lg p-4 flex flex-col items-center gap-2" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 12px rgba(0,0,0,0.03)' }}>
+              <div className="w-9 h-9 rounded-md flex items-center justify-center" style={{ background: s.bg }}><s.icon className="w-4 h-4" style={{ color: s.color }} /></div>
               <p className="text-xl font-black" style={{ color: '#1C1917' }}>{s.value}</p>
               <p className="text-[9px] font-bold uppercase tracking-wide text-center" style={{ color: '#A8A29E' }}>{s.label}</p>
             </motion.div>
@@ -51,14 +51,14 @@ export default function AdminDashboard() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Game runs table */}
-          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="lg:col-span-8 rounded-3xl p-5 sm:p-6" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}>
+          <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="lg:col-span-8 rounded-xl p-5 sm:p-6" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}>
             <h2 className="text-sm font-extrabold uppercase tracking-widest mb-5" style={{ color: '#A8A29E' }}>All Game Runs</h2>
             <div className="space-y-2.5">
               {mockGameRuns.map((run, i) => {
                 const st = STATUS_STYLES[run.status] || STATUS_STYLES['Complete']
                 return (
-                  <motion.div key={run.id} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 + i * 0.04 }} className="flex items-center gap-3 px-4 py-3.5 rounded-2xl" style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8' }}>
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0" style={{ background: st.bg }}>
+                  <motion.div key={run.id} initial={{ opacity: 0, x: -12 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.2 + i * 0.04 }} className="flex items-center gap-3 px-4 py-3.5 rounded-lg" style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8' }}>
+                    <div className="w-9 h-9 rounded-md flex items-center justify-center shrink-0" style={{ background: st.bg }}>
                       {run.status === 'Live' ? <Radio className="w-4 h-4" style={{ color: st.color }} /> : run.status === 'Complete' ? <CheckCircle2 className="w-4 h-4" style={{ color: st.color }} /> : run.status === 'Cancelled' || run.status === 'Failed' ? <XCircle className="w-4 h-4" style={{ color: st.color }} /> : <Clock className="w-4 h-4" style={{ color: st.color }} />}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -74,16 +74,16 @@ export default function AdminDashboard() {
 
           {/* Quick actions */}
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }} className="lg:col-span-4 flex flex-col gap-5">
-            <div className="rounded-3xl p-5" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}>
+            <div className="rounded-xl p-5" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}>
               <h2 className="text-sm font-extrabold uppercase tracking-widest mb-4" style={{ color: '#A8A29E' }}>Actions Required</h2>
               <div className="space-y-2.5">
-                <Link href="/admin/requests" className="flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all group" style={{ background: '#FFFBEB', border: '1.5px solid #FDE68A' }}>
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #FBBF24, #F59E0B)' }}><Shield className="w-4 h-4 text-white" /></div>
+                <Link href="/admin/requests" className="flex items-center gap-3 px-4 py-3.5 rounded-lg transition-all group" style={{ background: '#FFFBEB', border: '1.5px solid #FDE68A' }}>
+                  <div className="w-9 h-9 rounded-md flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #FBBF24, #F59E0B)' }}><Shield className="w-4 h-4 text-white" /></div>
                   <div className="flex-1"><p className="text-sm font-bold" style={{ color: '#92400E' }}>Host Requests</p><p className="text-[10px] font-semibold" style={{ color: '#B45309' }}>{stats.pendingHostRequests} pending approvals</p></div>
                   <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" style={{ color: '#D97706' }} />
                 </Link>
-                <Link href="/admin/voices" className="flex items-center gap-3 px-4 py-3.5 rounded-2xl transition-all group" style={{ background: '#F5F2FF', border: '1.5px solid #D9CCFF' }}>
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #7C5CFC, #9E80FF)' }}><Mic className="w-4 h-4 text-white" /></div>
+                <Link href="/admin/voices" className="flex items-center gap-3 px-4 py-3.5 rounded-lg transition-all group" style={{ background: '#F5F2FF', border: '1.5px solid #D9CCFF' }}>
+                  <div className="w-9 h-9 rounded-md flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #7C5CFC, #9E80FF)' }}><Mic className="w-4 h-4 text-white" /></div>
                   <div className="flex-1"><p className="text-sm font-bold" style={{ color: '#4F30C2' }}>Voice Profiles</p><p className="text-[10px] font-semibold" style={{ color: '#7C5CFC' }}>{stats.pendingVoiceApprovals} awaiting consent</p></div>
                   <ChevronRight className="w-4 h-4 transition-transform group-hover:translate-x-1" style={{ color: '#7C5CFC' }} />
                 </Link>
@@ -91,9 +91,9 @@ export default function AdminDashboard() {
             </div>
 
             {/* Security notice */}
-            <div className="rounded-3xl p-5" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}>
+            <div className="rounded-xl p-5" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}>
               <h2 className="text-sm font-extrabold uppercase tracking-widest mb-3" style={{ color: '#A8A29E' }}>Audit & Security</h2>
-              <div className="flex items-start gap-3 px-4 py-3 rounded-2xl" style={{ background: '#EDFAF5', border: '1.5px solid #A8EBCC' }}>
+              <div className="flex items-start gap-3 px-4 py-3 rounded-lg" style={{ background: '#EDFAF5', border: '1.5px solid #A8EBCC' }}>
                 <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" style={{ color: '#22AA6A' }} />
                 <div><p className="text-xs font-bold" style={{ color: '#0D512F' }}>All systems nominal</p><p className="text-[10px] font-semibold" style={{ color: '#178A53' }}>No failed deliveries, reward issues, or voice consent violations detected.</p></div>
               </div>

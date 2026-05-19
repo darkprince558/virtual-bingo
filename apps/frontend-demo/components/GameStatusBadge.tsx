@@ -12,6 +12,9 @@ const STATUS_CONFIG: Record<GameState, { bg: string; text: string; dot: string; 
   'Starting Soon': {
     bg: '#FEF3C7', text: '#D97706', dot: '#F59E0B', label: 'Starting Soon', pulse: true,
   },
+  'Lobby Open': {
+    bg: '#EDFAF5', text: '#116B3F', dot: '#22AA6A', label: 'Lobby Open', pulse: true,
+  },
   'Live': {
     bg: '#EDFAF5', text: '#116B3F', dot: '#22AA6A', label: 'Live', pulse: true,
   },
@@ -20,6 +23,12 @@ const STATUS_CONFIG: Record<GameState, { bg: string; text: string; dot: string; 
   },
   'Finished': {
     bg: '#F4F2EF', text: '#78716C', dot: '#A8A29E', label: 'Finished', pulse: false,
+  },
+  'Cancelled': {
+    bg: '#FFF1F2', text: '#BE123C', dot: '#F43F5E', label: 'Cancelled', pulse: false,
+  },
+  'Failed': {
+    bg: '#FFF1F2', text: '#BE123C', dot: '#F43F5E', label: 'Failed', pulse: false,
   },
 }
 

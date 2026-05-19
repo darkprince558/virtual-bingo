@@ -1,5 +1,7 @@
+'use client'
+
+import { motion, AnimatePresence } from 'motion/react'
 import { CalledWord } from '@/types/game'
-import { Clock } from 'lucide-react'
 
 interface CalledWordsFeedProps {
   words: CalledWord[]
@@ -18,7 +20,11 @@ export function CalledWordsFeed({ words }: CalledWordsFeedProps) {
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center gap-2 mb-3">
-        <Clock className="w-4 h-4" style={{ color: '#A8A29E' }} />
+        {/* Custom clock icon */}
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <circle cx="8" cy="8" r="6.5" stroke="#A8A29E" strokeWidth="1.5" />
+          <path d="M8 4.5v4l2.5 1.5" stroke="#A8A29E" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
         <span className="text-xs font-extrabold uppercase tracking-widest" style={{ color: '#A8A29E' }}>
           Called Words
         </span>
@@ -32,28 +38,65 @@ export function CalledWordsFeed({ words }: CalledWordsFeedProps) {
 
       <div className="flex-1 overflow-y-auto space-y-2 pr-1">
         {reversed.length === 0 ? (
-          <p className="text-sm text-center py-8" style={{ color: '#D6D3D1' }}>No words called yet</p>
-        ) : (
-          reversed.map((w, i) => (
-            <div
-              key={w.id}
-              className="flex items-center justify-between px-3.5 py-2.5 rounded-2xl transition-all"
-              style={{
-                background: i === 0 ? '#FFF4F0' : '#FAFAF9',
-                border: i === 0 ? '1.5px solid #FFE4D9' : '1.5px solid transparent',
-              }}
+          <div className="text-center py-8">
+            <motion.div
+              animate={{ opacity: [0.3, 0.7, 0.3] }}
+              transition={{ duration: 2, repeat: Infinity }}
+              className="mx-auto mb-2"
             >
-              <span
-                className="text-sm font-bold leading-tight"
-                style={{ color: i === 0 ? '#E8440A' : '#44403C' }}
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                <rect x="4" y="8" width="24" height="16" rx="4" stroke="#E7E5E4" strokeWidth="2" />
+                <line x1="10" y1="14" x2="22" y2="14" stroke="#E7E5E4" strokeWidth="2" strokeLinecap="round" />
+                <line x1="10" y1="18" x2="18" y2="18" stroke="#E7E5E4" strokeWidth="2" strokeLinecap="round" />
+              </svg>
+            </motion.div>
+            <p className="text-sm font-semibold" style={{ color: '#D6D3D1' }}>No words called yet</p>
+          </div>
+        ) : (
+          <AnimatePresence initial={false}>
+            {reversed.map((w, i) => (
+              <motion.div
+                key={w.id}
+                initial={{ opacity: 0, x: -16, scale: 0.95 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+                className="flex items-center justify-between px-3.5 py-2.5 rounded-md transition-all relative overflow-hidden"
+                style={{
+                  background: i === 0 ? '#FFF4F0' : '#FAFAF9',
+                  border: i === 0 ? '1.5px solid #FFE4D9' : '1.5px solid transparent',
+                }}
               >
-                {w.word}
-              </span>
-              <span className="text-[10px] font-semibold shrink-0 ml-3" style={{ color: '#A8A29E' }}>
-                {timeAgo(w.calledAt)}
-              </span>
-            </div>
-          ))
+                {/* Pulse glow on latest word */}
+                {i === 0 && (
+                  <motion.div
+                    className="absolute inset-0 pointer-events-none"
+                    animate={{ opacity: [0.1, 0.3, 0.1] }}
+                    transition={{ duration: 2, repeat: Infinity }}
+                    style={{ background: 'linear-gradient(135deg, rgba(255,90,31,0.08), transparent)' }}
+                  />
+                )}
+
+                <div className="flex items-center gap-2.5 relative z-10">
+                  {/* Call number */}
+                  <span
+                    className="text-[9px] font-black w-5 text-center shrink-0"
+                    style={{ color: i === 0 ? '#FF5A1F' : '#D6D3D1' }}
+                  >
+                    #{reversed.length - i}
+                  </span>
+                  <span
+                    className="text-sm font-bold leading-tight"
+                    style={{ color: i === 0 ? '#E8440A' : '#44403C' }}
+                  >
+                    {w.word}
+                  </span>
+                </div>
+                <span className="text-[10px] font-semibold shrink-0 ml-3 relative z-10" style={{ color: '#A8A29E' }}>
+                  {timeAgo(w.calledAt)}
+                </span>
+              </motion.div>
+            ))}
+          </AnimatePresence>
         )}
       </div>
     </div>

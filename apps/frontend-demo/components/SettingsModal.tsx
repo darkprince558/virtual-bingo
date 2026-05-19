@@ -49,7 +49,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             >
               <div className="flex items-center gap-2.5">
                 <div
-                  className="w-8 h-8 rounded-xl flex items-center justify-center"
+                  className="w-8 h-8 rounded-md flex items-center justify-center"
                   style={{ background: '#FFF4F0' }}
                 >
                   <Smile className="w-4 h-4" style={{ color: '#FF5A1F' }} />
@@ -59,7 +59,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <button
                 onClick={onClose}
                 aria-label="Close settings"
-                className="w-8 h-8 flex items-center justify-center rounded-xl transition-all"
+                className="w-8 h-8 flex items-center justify-center rounded-md transition-all"
                 style={{ background: '#F4F2EF', color: '#A8A29E' }}
               >
                 <X className="w-4 h-4" />
@@ -80,7 +80,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       whileTap={{ scale: 0.9 }}
                       whileHover={{ scale: 1.1 }}
                       onClick={() => { setAvatar(a); onClose(); }}
-                      className="aspect-square rounded-2xl text-2xl flex items-center justify-center transition-all"
+                      className="aspect-square rounded-lg text-2xl flex items-center justify-center transition-all"
                       style={{
                         background: isSelected ? '#FFF4F0' : '#FAFAF9',
                         border: isSelected ? '2px solid #FF5A1F' : '2px solid transparent',
@@ -103,7 +103,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               style={{ borderTop: '1px solid #F4F2EF', background: '#FAFAF9' }}
             >
               <div
-                className="w-10 h-10 rounded-2xl flex items-center justify-center text-2xl"
+                className="w-10 h-10 rounded-lg flex items-center justify-center text-2xl"
                 style={{ background: '#FFF4F0', border: '2px solid #FFE4D9' }}
               >
                 {avatar}

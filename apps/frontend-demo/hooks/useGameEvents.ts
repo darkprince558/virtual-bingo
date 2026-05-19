@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { GameEventResponse } from '@/types/api'
+import { API_BASE_URL } from '@/lib/apiClient'
 
 export function useGameEvents(gameId: string | null, devAuth: { devUserEmail?: string; devUserName?: string; devUserRole?: string } = {}) {
   const [events, setEvents] = useState<GameEventResponse[]>([])
@@ -10,21 +11,6 @@ export function useGameEvents(gameId: string | null, devAuth: { devUserEmail?: s
   useEffect(() => {
     if (!gameId) return
 
-    let isSubscribed = true
-    const baseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8080/api/v1'
-    
-    // Construct query params for dev auth if provided
-    const params = new URLSearchParams()
-    if (devAuth.devUserEmail) params.set('devEmail', devAuth.devUserEmail)
-    if (devAuth.devUserName) params.set('devName', devAuth.devUserName)
-    if (devAuth.devUserRole) params.set('devRole', devAuth.devUserRole)
-    
-    // Using native EventSource for SSE
-    // Since EventSource doesn't support custom headers easily without polyfills,
-    // we must pass the dev auth via query params if the backend supports it.
-    // Let's assume the backend dev auth middleware supports reading from query params for EventSource,
-    // or we use a fetch-based approach to read the stream if headers are strictly required.
-    // Fetch-based approach reading stream:
     let abortController = new AbortController()
     
     async function connect() {
@@ -36,7 +22,7 @@ export function useGameEvents(gameId: string | null, devAuth: { devUserEmail?: s
         if (devAuth.devUserName) headers['X-Dev-User-Name'] = devAuth.devUserName
         if (devAuth.devUserRole) headers['X-Dev-User-Role'] = devAuth.devUserRole
 
-        const response = await fetch(`${baseUrl}/games/${gameId}/events`, {
+        const response = await fetch(`${API_BASE_URL}/games/${gameId}/events`, {
           headers,
           signal: abortController.signal
         })
@@ -92,7 +78,6 @@ export function useGameEvents(gameId: string | null, devAuth: { devUserEmail?: s
     connect()
 
     return () => {
-      isSubscribed = false
       abortController.abort()
     }
   }, [gameId, devAuth.devUserEmail, devAuth.devUserName, devAuth.devUserRole])
