@@ -604,6 +604,13 @@ def sanitize_theme_response(
         for key, value in response.palette.items()
         if safe_theme_token(key) and safe_theme_value(value)
     }
+    response.name = safe_theme_text(response.name, "Mock Bingo Theme")
+    response.summary = safe_theme_text(
+        response.summary,
+        "A safe structured theme using only allowed tokens."
+    )
+    response.motion = safe_theme_text(response.motion, "subtle")
+    response.caller_tone = safe_theme_text(response.caller_tone, "friendly host")
     response.accessibility["contrastChecked"] = True
     response.accessibility["avoidColorOnlyMeaning"] = True
     return response
@@ -636,6 +643,13 @@ def safe_theme_value(value: str) -> bool:
         and "{" not in value
         and "}" not in value
     )
+
+
+def safe_theme_text(value: str, fallback: str) -> str:
+    clean_value = " ".join((value or "").split())
+    if clean_value and safe_theme_value(clean_value):
+        return clean_value
+    return fallback
 
 
 def resolve_audio_output(

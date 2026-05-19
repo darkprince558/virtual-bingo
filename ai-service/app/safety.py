@@ -35,37 +35,3 @@ def ensure_non_critical_commentary(text: str) -> str:
             )
 
     return text
-
-
-def validate_called_number(called_number: str) -> bool:
-    """
-    Checks whether a Bingo call is in the correct format and range.
-
-    This only checks format/range.
-    It does NOT confirm whether the number was officially called.
-    Official game state must be handled by the Go backend.
-    """
-
-    if not called_number or len(called_number) < 2:
-        return False
-
-    letter = called_number[0].upper()
-    number_part = called_number[1:]
-
-    if letter not in ["B", "I", "N", "G", "O"]:
-        return False
-
-    if not number_part.isdigit():
-        return False
-
-    number = int(number_part)
-
-    valid_ranges = {
-        "B": range(1, 16),
-        "I": range(16, 31),
-        "N": range(31, 46),
-        "G": range(46, 61),
-        "O": range(61, 76),
-    }
-
-    return number in valid_ranges[letter]
