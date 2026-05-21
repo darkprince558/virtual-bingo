@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { motion } from 'motion/react'
-import { ArrowRight, Shield, Target, Trophy, Bot } from 'lucide-react'
+import { ArrowRight, Shield, Target, Trophy, Bot, MonitorPlay } from 'lucide-react'
 import { DecorativeBlobs } from '@/components/illustrations/DecorativeBlobs'
 import { BingoCharacter } from '@/components/illustrations/BingoCharacter'
 
@@ -283,6 +283,24 @@ export default function LandingPage() {
                 I&apos;m a host, take me to the dashboard
               </div>
               <ArrowRight className="w-3.5 h-3.5 shrink-0" style={{ color: '#A8A29E' }} />
+            </Link>
+            <Link
+              href="/demo"
+              id="demoModeLink"
+              className="w-full flex items-center justify-between gap-3 px-4 py-3.5 rounded-xl text-sm font-bold transition-all hover:brightness-95 active:scale-[0.99]"
+              style={{
+                background: '#FFF4F0',
+                color: '#C23208',
+                border: '1.5px solid #FFE4D9',
+              }}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0" style={{ background: '#FFE4D9' }}>
+                  <MonitorPlay className="w-3.5 h-3.5" style={{ color: '#E8440A' }} />
+                </div>
+                Demo Mode for presentation
+              </div>
+              <ArrowRight className="w-3.5 h-3.5 shrink-0" style={{ color: '#E8440A' }} />
             </Link>
             <Link
               href="/admin"

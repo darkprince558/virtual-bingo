@@ -9,6 +9,7 @@
 - `architecture/FULL_SCALE_DEPLOYMENT_ROADMAP.md` - full CGI/Azure/Microsoft 365/AI/rewards deployment roadmap beyond V1.
 - `architecture/FULL_SCALE_FEATURE_API_BACKLOG.md` - API backlog for Teams app access, voice Bingo claims, auto-mark mode, AI caller sentences/audio, and AI theme generation.
 - `architecture/AI_SERVICE_INTEGRATION_PLAN.md` - Go/Python AI-service boundary, pre-game content lock flow, caller audio generation, theme generation, and later lobby chat plan.
+- `architecture/DEMO_AZURE_AI_WIRING_PLAN.md` - short May 22 demo plan for what to wire to Azure/AI, what to keep mocked, and the backup path.
 - `../backend-go/README.md` - local Go backend run/test commands.
 
 ## Product And Proposal References

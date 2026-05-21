@@ -47,6 +47,9 @@ export default function HostDashboardPage() {
   const [newPlayersText, setNewPlayersText] = useState('')
   const [setupNotice, setSetupNotice] = useState<string | null>(null)
   const [isSavingSetup, setIsSavingSetup] = useState(false)
+  const [themeForm, setThemeForm] = useState({ prompt: '', tone: 'fun' })
+  const [isGeneratingTheme, setIsGeneratingTheme] = useState(false)
+  const [isSendingInvites, setIsSendingInvites] = useState(false)
 
   useEffect(() => {
     async function loadGames() {
@@ -186,6 +189,48 @@ export default function HostDashboardPage() {
       setApiError(err instanceof Error ? err.message : 'Failed to add allowed players')
     } finally {
       setIsSavingSetup(false)
+    }
+  }
+
+  const handleGenerateTheme = async () => {
+    if (!setupRun || !themeForm.prompt) return
+    setIsGeneratingTheme(true)
+    setSetupNotice(null)
+    try {
+      const theme = await apiClient<any>('/themes/generate', {
+        method: 'POST',
+        devUserRole: 'host',
+        body: JSON.stringify({ gameRunId: setupRun.id, prompt: themeForm.prompt, tone: themeForm.tone })
+      })
+      await apiClient<any>(`/games/${setupRun.id}/theme`, {
+        method: 'POST',
+        devUserRole: 'host',
+        body: JSON.stringify({ themeId: theme.id })
+      })
+      setSetupNotice(`AI Theme "${theme.name}" applied successfully!`)
+      setThemeForm({ prompt: '', tone: 'fun' })
+      await refreshGames()
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Failed to generate theme')
+    } finally {
+      setIsGeneratingTheme(false)
+    }
+  }
+
+  const handleSendInvites = async () => {
+    if (!setupRun) return
+    setIsSendingInvites(true)
+    setSetupNotice(null)
+    try {
+      await apiClient(`/games/${setupRun.id}/deliveries/player-invites`, {
+        method: 'POST',
+        devUserRole: 'host'
+      })
+      setSetupNotice('Invites successfully sent to allowed players!')
+    } catch (err) {
+      setApiError(err instanceof Error ? err.message : 'Failed to send invites')
+    } finally {
+      setIsSendingInvites(false)
     }
   }
 
@@ -572,6 +617,55 @@ export default function HostDashboardPage() {
                   />
                   <button onClick={handleAddPlayers} disabled={isSavingSetup || !newPlayersText.trim()} className="mt-2 w-full py-3 rounded-lg text-sm font-extrabold" style={{ background: '#EDFAF5', color: '#116B3F', opacity: isSavingSetup || !newPlayersText.trim() ? 0.55 : 1 }}>
                     Add Allowed Players
+                  </button>
+                  <button onClick={handleSendInvites} disabled={isSendingInvites || allowedPlayers.length === 0} className="mt-2 w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#F5F2FF', color: '#6440E8', opacity: isSendingInvites || allowedPlayers.length === 0 ? 0.55 : 1 }}>
+                    {isSendingInvites ? 'Sending...' : 'Send Invites'}
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {setupRun && (
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.22 }}
+                className="rounded-xl p-5"
+                style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)' }}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-sm font-extrabold uppercase tracking-widest flex items-center gap-2" style={{ color: '#A8A29E' }}>
+                    <Sparkles className="w-4 h-4 text-[#F59E0B]" /> AI Theme Generator
+                  </h2>
+                </div>
+                <div className="space-y-3">
+                  <label className="block">
+                    <span className="text-xs font-extrabold" style={{ color: '#78716C' }}>Theme Prompt</span>
+                    <input
+                      value={themeForm.prompt}
+                      onChange={e => setThemeForm(prev => ({ ...prev, prompt: e.target.value }))}
+                      placeholder="e.g. Space Odyssey, 90s Office Party..."
+                      className="mt-1 w-full px-3 py-2.5 rounded-lg text-sm font-bold outline-none"
+                      style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#1C1917' }}
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-xs font-extrabold" style={{ color: '#78716C' }}>Tone</span>
+                    <select
+                      value={themeForm.tone}
+                      onChange={e => setThemeForm(prev => ({ ...prev, tone: e.target.value }))}
+                      className="mt-1 w-full px-3 py-2.5 rounded-lg text-sm font-bold outline-none"
+                      style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8', color: '#1C1917' }}
+                    >
+                      <option value="fun">Fun & Casual</option>
+                      <option value="professional">Professional</option>
+                      <option value="spooky">Spooky</option>
+                      <option value="retro">Retro</option>
+                    </select>
+                  </label>
+                  <button onClick={handleGenerateTheme} disabled={isGeneratingTheme || !themeForm.prompt} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FFF4F0', color: '#E8440A', opacity: isGeneratingTheme || !themeForm.prompt ? 0.65 : 1 }}>
+                    <Sparkles className="w-4 h-4" />
+                    {isGeneratingTheme ? 'Generating Theme...' : 'Generate & Apply Theme'}
                   </button>
                 </div>
               </motion.div>

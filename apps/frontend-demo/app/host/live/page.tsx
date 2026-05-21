@@ -276,7 +276,7 @@ function HostLiveContent() {
           <div className={`col-span-1 lg:col-span-5 flex-col gap-5 ${mobileTab === 'controls' ? 'flex' : 'hidden lg:flex'}`}>
 
             {/* Current word */}
-            <CurrentCallDisplay word={snapshot.currentWord?.word} />
+            <CurrentCallDisplay word={snapshot.currentWord?.word} audioUrl={snapshot.currentCallerAsset?.audioUrl} />
 
             {/* Controls */}
             <HostControls

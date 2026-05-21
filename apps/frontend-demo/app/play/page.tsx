@@ -325,6 +325,7 @@ function PlayContent() {
             word={currentWord?.word}
             aiMessage={snapshot.currentCallerAsset?.line || `Winning pattern: ${mapBingoPattern(snapshot.winningPattern)}`}
             callNumber={snapshot.calledWords.length + (currentWord ? 1 : 0)}
+            audioUrl={snapshot.currentCallerAsset?.audioUrl}
           />
 
           {missedWords.length > 0 && (

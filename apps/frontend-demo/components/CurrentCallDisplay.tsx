@@ -7,9 +7,10 @@ interface CurrentCallDisplayProps {
   word?: string
   aiMessage?: string
   callNumber?: number
+  audioUrl?: string
 }
 
-export function CurrentCallDisplay({ word, aiMessage, callNumber }: CurrentCallDisplayProps) {
+export function CurrentCallDisplay({ word, aiMessage, callNumber, audioUrl }: CurrentCallDisplayProps) {
   return (
     <div
       className="w-full rounded-xl overflow-hidden relative"
@@ -138,6 +139,9 @@ export function CurrentCallDisplay({ word, aiMessage, callNumber }: CurrentCallD
           </p>
         </motion.div>
       )}
+
+      {/* AI Audio Playback */}
+      {audioUrl && <audio key={audioUrl} autoPlay src={audioUrl} className="hidden" />}
     </div>
   )
 }

@@ -25,9 +25,42 @@ npm install
 npm run dev
 ```
 
+## Presentation Demo Mode
+
+For manager/judge demos, use the seeded `LOCAL-DEMO` flow instead of creating games live.
+
+Terminal 1, from the repo root:
+
+```bash
+./scripts/demo-backend.sh
+```
+
+The demo backend uses Postgres on host port `55432` by default so it does not collide with a local Postgres on `5432`.
+
+Terminal 2, from the repo root:
+
+```bash
+./scripts/demo-frontend.sh
+```
+
+Then open:
+
+```text
+http://localhost:3004/demo
+```
+
+The demo control room can prepare the AI/content pipeline, jump to the host/player/summary screens, join seeded players, and prime a real backend-confirmed winner moment for the presentation.
+
+Quick smoke check after both servers are running:
+
+```bash
+./scripts/demo-smoke.sh
+```
+
 ## Notes
 
 - Landing, host dashboard, setup, AI content review, quick start, host live control, lobby, player game, activity feed, claim acknowledgements, and summary use backend-backed flows where available.
+- `/demo` is the presentation control room for the seeded `LOCAL-DEMO` game. It avoids creating games mid-presentation and includes a real API-driven winner shortcut.
 - The AI review screen uses the existing Go content pipeline: prepare, edit, lock, generate caller assets, and open lobby. With `AI_SERVICE_ENABLED=false`, the backend uses local deterministic fallback content; no Python, Azure, or provider credentials are required for this wired demo path.
 - The host setup panel on `/host` can edit game name/code/winning pattern, choose a word set, update marking/readiness settings, and bulk add allowed players.
 - Player game sends heartbeat calls while open, shows reconnect missed-word notices, and displays claim-readiness before submission. Backend claim validation remains authoritative.
