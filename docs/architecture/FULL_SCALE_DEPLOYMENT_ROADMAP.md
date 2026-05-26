@@ -91,7 +91,7 @@ Why third: production frontend wiring and live play need reliable reconnect beha
 
 ### 4. Frontend Wiring To The Go Backend
 
-Turn the existing demo into a real backend-backed product flow.
+Turn the current Next.js web app into a real backend-backed product flow.
 
 - Replace mock host game creation with API calls.
 - Replace mock player join/rejoin with allowlist-backed backend joins.
@@ -99,7 +99,7 @@ Turn the existing demo into a real backend-backed product flow.
 - Wire marks, calls, claims, winners, and summaries.
 - Subscribe to SSE first and refetch snapshots after important events.
 - Add heartbeat calls from player screens.
-- Keep visual design workplace-appropriate and close to the current demo unless there is a specific product reason to redesign.
+- Keep visual design workplace-appropriate and avoid redesigning without a specific product reason.
 
 Why fourth: this is where the platform becomes usable end to end.
 

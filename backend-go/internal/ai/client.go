@@ -15,6 +15,84 @@ const MinGamePrepWords = 24
 
 var ErrInvalidGamePrep = errors.New("invalid game prep response")
 
+var localGamePrepWords = []string{
+	"Standup",
+	"Sprint Planning",
+	"Code Review",
+	"Deployment",
+	"Retrospective",
+	"Client Review",
+	"Documentation",
+	"Bug Bash",
+	"Architecture Review",
+	"Coffee Chat",
+	"Pull Request",
+	"Standards Review",
+	"Lunch and Learn",
+	"Release Notes",
+	"Security Review",
+	"Accessibility",
+	"Mentorship",
+	"Knowledge Transfer",
+	"Retest",
+	"Backlog Grooming",
+	"Pair Programming",
+	"Environment Setup",
+	"Ticket Refinement",
+	"Design Review",
+	"Production Check",
+	"Team Win",
+	"Deep Dive",
+	"Circle Back",
+	"Action Item",
+	"Touch Base",
+	"Roadmap",
+	"Stakeholder Update",
+	"Risk Review",
+	"Launch Plan",
+	"Quality Gate",
+	"User Feedback",
+	"Feature Flag",
+	"Incident Review",
+	"Launch Day",
+	"Project Kickoff",
+	"Status Update",
+	"Team Sync",
+	"Milestone",
+	"Sprint Review",
+	"UAT",
+	"QA Pass",
+	"Release Train",
+	"Change Request",
+	"Stakeholder Signoff",
+	"Knowledge Base",
+	"Runbook",
+	"Postmortem",
+	"Root Cause",
+	"Blocker",
+	"Dependency",
+	"Acceptance Criteria",
+	"User Story",
+	"Feature Review",
+	"Production Support",
+	"Incident Triage",
+	"Service Desk",
+	"Onboarding",
+	"Workshop",
+	"Training Session",
+	"Requirements Review",
+	"Solution Design",
+	"Data Migration",
+	"API Contract",
+	"Integration Test",
+	"Regression Test",
+	"Smoke Test",
+	"Cutover Plan",
+	"Go Live",
+	"Lessons Learned",
+	"Customer Success",
+}
+
 type GamePrepInput struct {
 	GameRunID     string            `json:"gameRunId"`
 	TopicPrompt   string            `json:"topicPrompt,omitempty"`
@@ -224,14 +302,14 @@ func (DisabledClient) GenerateGamePrep(ctx context.Context, input GamePrepInput)
 	if count < MinGamePrepWords {
 		count = MinGamePrepWords
 	}
-	words := make([]string, 0, count)
-	for index := 1; index <= count; index++ {
-		words = append(words, fmt.Sprintf("Local Prep Word %02d", index))
+	if count > len(localGamePrepWords) {
+		count = len(localGamePrepWords)
 	}
+	words := append([]string(nil), localGamePrepWords[:count]...)
 
 	return NormalizeGamePrepOutput(GamePrepOutput{
-		Topic:       "Local Generated Bingo",
-		Summary:     "Local disabled AI response for content review and lock testing.",
+		Topic:       "Workplace Wins Bingo",
+		Summary:     "Office-friendly bingo content for local content review, rehearsal, and lock testing.",
 		Words:       words,
 		CallerStyle: firstNonBlank(input.Settings["callerStyle"], "light workplace caller"),
 		Provider:    "local-disabled",

@@ -1,0 +1,5 @@
+.env
+.env.*
+api
+*.test
+coverage.out

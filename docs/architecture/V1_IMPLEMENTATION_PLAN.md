@@ -47,7 +47,7 @@ Production V1 is still built locally first, but local work should be shaped for 
 - Claim button and claim result display.
 - Winner and summary presentation.
 - Calling backend APIs with simple development auth headers or local user selectors.
-- Keeping the existing manager-demo styling useful without treating it as final production UI.
+- Keeping the existing workplace styling useful without treating it as final production UI.
 
 ## Backend Milestone Order
 
@@ -76,7 +76,7 @@ Production V1 is still built locally first, but local work should be shaped for 
 
 ## Frontend Milestone Order
 
-1. Point the demo app at the Go backend through environment-based API configuration.
+1. Point the web app at the Go backend through environment-based API configuration.
 2. Replace mock host game creation with backend-backed game runs.
 3. Replace mock lobby/player data with backend join/rejoin APIs.
 4. Replace mock cards with backend-assigned persisted cards.
@@ -181,7 +181,7 @@ The first Go-side content automation slice is implemented.
 The follow-on autonomous game-prep slice is now implemented too.
 
 - `game_call_deck` stores the locked post-content randomization using a stored seed and shuffle version.
-- Live `POST /api/v1/games/{gameID}/calls` follows the locked deck when present and preserves the older active-word fallback for local/demo games without a deck.
+- Live `POST /api/v1/games/{gameID}/calls` follows the locked deck when present and preserves the older active-word fallback for local development games without a deck.
 - `caller_assets` stores deck-linked caller lines, provider/status, optional audio URL/storage key, and fallback text so live gameplay does not wait on Azure Speech.
 - `delivery_batches` and `delivery_attempts` store local/mock player-invite delivery attempts with `/join?code={CODE}` links; real Graph/Teams/email delivery remains behind the delivery boundary.
 - `POST /api/v1/games/{gameID}/lobby/open` is the manual T-10 hook, and player avatar profile fields are persisted on `players`.

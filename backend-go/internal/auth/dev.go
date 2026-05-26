@@ -68,7 +68,7 @@ func (a DevAuthenticator) PrincipalFromRequest(r *http.Request) (Principal, bool
 
 	displayName := strings.TrimSpace(r.Header.Get("X-Dev-User-Name"))
 	if displayName == "" {
-		displayName = "Local Demo Host"
+		displayName = "Local Development Host"
 	}
 
 	role := strings.TrimSpace(r.Header.Get("X-Dev-User-Role"))

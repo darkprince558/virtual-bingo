@@ -24,6 +24,21 @@ func TestDisabledClientGeneratesValidLocalGamePrep(t *testing.T) {
 	if len(output.Words) != MinGamePrepWords {
 		t.Fatalf("expected disabled client to enforce %d words, got %d", MinGamePrepWords, len(output.Words))
 	}
+	if output.Topic != "Workplace Wins Bingo" || output.Words[0] != "Standup" || strings.Contains(strings.Join(output.Words, " "), "Local Prep Word") {
+		t.Fatalf("expected real local development words, got %+v", output)
+	}
+
+	fullOutput, err := (DisabledClient{}).GenerateGamePrep(context.Background(), GamePrepInput{
+		GameRunID: "game-1",
+		WordCount: 75,
+		Settings:  map[string]string{},
+	})
+	if err != nil {
+		t.Fatalf("generate full disabled prep: %v", err)
+	}
+	if len(fullOutput.Words) != 75 || strings.Contains(strings.Join(fullOutput.Words, " "), "Word 75") {
+		t.Fatalf("expected 75 real local development words, got %+v", fullOutput)
+	}
 }
 
 func TestNormalizeGamePrepOutputTrimsAndDedupesWords(t *testing.T) {

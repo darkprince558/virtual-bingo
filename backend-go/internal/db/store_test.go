@@ -78,14 +78,14 @@ func TestStoreAllowedPlayers(t *testing.T) {
 	if _, err := store.AddAllowedPlayer(ctx, AddAllowedPlayerParams{
 		GameRunID:   runID,
 		Email:       "alex@example.local",
-		DisplayName: "Alex Demo",
+		DisplayName: "Alex Local",
 	}); err != nil {
 		t.Fatalf("add first allowed player: %v", err)
 	}
 	if _, err := store.AddAllowedPlayer(ctx, AddAllowedPlayerParams{
 		GameRunID:   runID,
 		Email:       "sam@example.local",
-		DisplayName: "Sam Demo",
+		DisplayName: "Sam Local",
 		Source:      "seed",
 	}); err != nil {
 		t.Fatalf("add second allowed player: %v", err)
@@ -113,7 +113,7 @@ func TestStoreCardCreation(t *testing.T) {
 	player, err := store.CreatePlayer(ctx, CreatePlayerParams{
 		GameRunID:   runID,
 		Email:       "player@example.local",
-		DisplayName: "Player Demo",
+		DisplayName: "Player Local",
 		State:       "playing",
 	})
 	if err != nil {

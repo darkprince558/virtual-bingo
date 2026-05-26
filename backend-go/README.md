@@ -107,7 +107,7 @@ API responses are wrapped as `{ "data": ... }` for success and `{ "error": { "co
 - `PATCH /api/v1/games/{gameID}/content` lets a host/admin edit topic, summary, words, and caller style before lock. Words are trimmed, blank words are rejected, case-insensitive duplicates are removed, and at least 24 unique words are required.
 - `POST /api/v1/games/{gameID}/content/lock` is a host/admin-only manual automation hook for local testing the T-30 lock job. It freezes the final topic/summary/words, creates an approved `ai_generated` word set from the locked words, creates a deterministic locked call deck from a stored seed/version, associates the game run with that word set, and blocks later content edits.
 - `POST /api/v1/games/{gameID}/caller-assets/generate` is a host/admin-only post-lock hook. It sends the locked deck to Python `POST /ai/v1/caller-assets/bulk` when enabled, or to the local disabled client when `AI_SERVICE_ENABLED=false`, then stores one `caller_assets` row per deck item. Missing or failed assets keep fallback text such as `Next word is {word}.` so live gameplay never waits on Azure Speech.
-- `POST /api/v1/games/{gameID}/calls` uses the locked deck order when a deck exists and links the committed called word back to the deck item. Older manual/demo games without a locked deck keep the existing active-word fallback.
+- `POST /api/v1/games/{gameID}/calls` uses the locked deck order when a deck exists and links the committed called word back to the deck item. Older manual/local games without a locked deck keep the existing active-word fallback.
 - `POST /api/v1/games/{gameID}/deliveries/player-invites` creates local/mock email delivery attempts from the allowed-player list. Attempts are recorded as sent with `/join?code={CODE}` links; login and allowlist checks remain authoritative. `GET /api/v1/games/{gameID}/deliveries` lists attempts and `POST /api/v1/deliveries/{deliveryID}/retry` resets a failed/mock attempt through the same local delivery boundary.
 - `POST /api/v1/games/{gameID}/lobby/open` is the manual T-10 automation hook. It supports `draft`, `scheduled`, and `invites_sent` into `lobby_open`; live start still uses the existing start endpoint.
 - `PATCH /api/v1/games/{gameID}/players/me/profile` lets the current player set a safe stored avatar profile: fixed icon ID, hex avatar color, and short label. Arbitrary image URLs are not accepted.
@@ -131,7 +131,7 @@ Development auth is header-based:
 
 ```text
 X-Dev-User-Email: host@example.local
-X-Dev-User-Name: Local Demo Host
+X-Dev-User-Name: Local Development Host
 X-Dev-User-Role: host
 ```
 
@@ -260,18 +260,18 @@ cd /Users/anish/Downloads/Work/BingoGame/backend-go
 DATABASE_URL=postgres://bingo:bingo@localhost:5432/virtual_bingo?sslmode=disable go run ./cmd/migrate down
 ```
 
-Seed the local demo game after migrations:
+Seed the local development game after migrations:
 
 ```bash
 cd /Users/anish/Downloads/Work/BingoGame/backend-go
-psql "postgres://bingo:bingo@localhost:5432/virtual_bingo?sslmode=disable" -f internal/db/seeds/local_demo.sql
+psql "postgres://bingo:bingo@localhost:5432/virtual_bingo?sslmode=disable" -f internal/db/seeds/local_dev.sql
 ```
 
 If `psql` is not installed locally, run the seed through Docker from the repo root:
 
 ```bash
 cd /Users/anish/Downloads/Work/BingoGame
-docker exec -i virtual-bingo-postgres psql -U bingo -d virtual_bingo < backend-go/internal/db/seeds/local_demo.sql
+docker exec -i virtual-bingo-postgres psql -U bingo -d virtual_bingo < backend-go/internal/db/seeds/local_dev.sql
 ```
 
 The local seed creates one host, one reusable word set, one game template/run, and a few allowed players.
@@ -293,7 +293,7 @@ curl -sS http://localhost:8080/api/v1/config
 
 curl -sS http://localhost:8080/api/v1/me \
   -H 'X-Dev-User-Email: host@example.local' \
-  -H 'X-Dev-User-Name: Local Demo Host' \
+  -H 'X-Dev-User-Name: Local Development Host' \
   -H 'X-Dev-User-Role: host'
 ```
 
@@ -303,7 +303,7 @@ Create a game using the seeded word set:
 curl -sS -X POST http://localhost:8080/api/v1/games \
   -H 'Content-Type: application/json' \
   -H 'X-Dev-User-Email: host@example.local' \
-  -H 'X-Dev-User-Name: Local Demo Host' \
+  -H 'X-Dev-User-Name: Local Development Host' \
   -H 'X-Dev-User-Role: host' \
   -d '{"name":"Local API Game","wordSetId":"00000000-0000-0000-0000-000000000201"}'
 ```
@@ -315,7 +315,7 @@ curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/allowed-players \
   -H 'Content-Type: application/json' \
   -H 'X-Dev-User-Email: host@example.local' \
   -H 'X-Dev-User-Role: host' \
-  -d '{"email":"alex@example.local","displayName":"Alex Demo"}'
+  -d '{"email":"alex@example.local","displayName":"Alex Local"}'
 ```
 
 Bulk add allowed players. This commits all rows or none:
@@ -325,7 +325,7 @@ curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/allowed-players/bu
   -H 'Content-Type: application/json' \
   -H 'X-Dev-User-Email: host@example.local' \
   -H 'X-Dev-User-Role: host' \
-  -d '[{"email":"alex@example.local","displayName":"Alex Demo"},{"email":"sam@example.local","displayName":"Sam Demo"}]'
+  -d '[{"email":"alex@example.local","displayName":"Alex Local"},{"email":"sam@example.local","displayName":"Sam Local"}]'
 ```
 
 List games by current-user scope, or look one up by code:
@@ -363,7 +363,7 @@ curl -sS -X PATCH http://localhost:8080/api/v1/games/<game-id>/content \
   -H 'Content-Type: application/json' \
   -H 'X-Dev-User-Email: host@example.local' \
   -H 'X-Dev-User-Role: host' \
-  -d '{"topic":"Edited Local Topic","words":["Word 01","Word 02","Word 03","Word 04","Word 05","Word 06","Word 07","Word 08","Word 09","Word 10","Word 11","Word 12","Word 13","Word 14","Word 15","Word 16","Word 17","Word 18","Word 19","Word 20","Word 21","Word 22","Word 23","Word 24"]}'
+  -d '{"topic":"Edited Local Topic","words":["Standup","Sprint Planning","Code Review","Deployment","Retrospective","Client Review","Documentation","Bug Bash","Architecture Review","Coffee Chat","Pull Request","Standards Review","Lunch and Learn","Release Notes","Security Review","Accessibility","Mentorship","Knowledge Transfer","Retest","Backlog Grooming","Pair Programming","Environment Setup","Ticket Refinement","Design Review"]}'
 
 curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/content/lock \
   -H 'X-Dev-User-Email: host@example.local' \
@@ -375,7 +375,7 @@ Join the player:
 ```bash
 curl -sS -X POST http://localhost:8080/api/v1/games/<game-id>/players \
   -H 'Content-Type: application/json' \
-  -d '{"email":"alex@example.local","displayName":"Alex Demo"}'
+  -d '{"email":"alex@example.local","displayName":"Alex Local"}'
 ```
 
 Assign and fetch a card:
@@ -404,7 +404,7 @@ curl -sS -X POST http://localhost:8080/api/v1/word-sets \
   -H 'Content-Type: application/json' \
   -H 'X-Dev-User-Email: host@example.local' \
   -H 'X-Dev-User-Role: host' \
-  -d '{"name":"Manual Demo Words","status":"draft","source":"manual","words":[{"word":"Planning"},{"word":"Launch"}]}'
+  -d '{"name":"Manual Local Words","status":"draft","source":"manual","words":[{"word":"Planning"},{"word":"Launch"}]}'
 
 curl -sS -X POST http://localhost:8080/api/v1/word-sets/<word-set-id>/words \
   -H 'Content-Type: application/json' \

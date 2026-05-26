@@ -541,7 +541,7 @@ Use Microsoft Entra ID access tokens:
 
 Open decision:
 
-- Guests by game code may be useful for demos, but corporate production probably wants Entra-only or explicit guest-mode controls.
+- Guests by game code may be useful for local testing, but corporate production probably wants Entra-only or explicit guest-mode controls.
 
 ## Implementation Milestones
 
@@ -568,7 +568,7 @@ Deliverables:
 - Postgres docker compose for local development.
 - Migrations for tenants, users, sessions, players, word banks, cards, calls, claims, winners, audit events.
 - `sqlc` query setup.
-- Seed data matching the current mock bingo demo.
+- Seed data matching the current local bingo flow.
 
 Done when:
 
@@ -584,7 +584,7 @@ Deliverables:
 - Join session by code.
 - Generate/persist player card.
 - Host/player snapshot endpoints.
-- Frontend can replace `mockGameData` for lobby/play/host snapshots.
+- Frontend can use backend lobby/play/host snapshots directly.
 
 Done when:
 

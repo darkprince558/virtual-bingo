@@ -259,7 +259,7 @@ func TestAPIGameAllowlistJoinAndCardFlow(t *testing.T) {
 
 	allowedResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/allowed-players", map[string]any{
 		"email":       "alex@example.local",
-		"displayName": "Alex Demo",
+		"displayName": "Alex Local",
 	})
 	if allowedResp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected add allowed player 201, got %d: %s", allowedResp.StatusCode, allowedResp.Body)
@@ -280,7 +280,7 @@ func TestAPIGameAllowlistJoinAndCardFlow(t *testing.T) {
 
 	joinResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/players", map[string]any{
 		"email":       "alex@example.local",
-		"displayName": "Alex Demo",
+		"displayName": "Alex Local",
 	})
 	if joinResp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected join player 201, got %d: %s", joinResp.StatusCode, joinResp.Body)
@@ -289,7 +289,7 @@ func TestAPIGameAllowlistJoinAndCardFlow(t *testing.T) {
 
 	rejoinResp := doRequest(t, handler, http.MethodPost, "/api/v1/games/"+gameID+"/players", map[string]any{
 		"email":       "alex@example.local",
-		"displayName": "Alex Demo",
+		"displayName": "Alex Local",
 	})
 	if rejoinResp.StatusCode != http.StatusCreated {
 		t.Fatalf("expected rejoin player 201, got %d: %s", rejoinResp.StatusCode, rejoinResp.Body)
