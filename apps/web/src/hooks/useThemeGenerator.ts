@@ -1,23 +1,25 @@
 import { useState } from "react";
+import type { Theme } from "../types/theme";
 import { generateTheme } from "../api/themeApi";
 
-
 export function useThemeGenerator() {
+  const [theme, setTheme] = useState<Theme | null>(null);
+  const [loading, setLoading] = useState(false);
 
-    const [theme, setTheme] = useState();
+  async function createTheme(topic: string) {
+    setLoading(true);
 
-    const createTheme = async (
-        topic: string
-    ) => {
+    try {
+      const result = await generateTheme(topic);
+      setTheme(result);
+    } finally {
+      setLoading(false);
+    }
+  }
 
-        const result =
-            await generateTheme(topic);
-
-        setTheme(result);
-    };
-
-    return {
-        theme,
-        createTheme
-    };
+  return {
+    theme,
+    loading,
+    createTheme
+  };
 }
