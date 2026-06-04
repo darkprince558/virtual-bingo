@@ -53,3 +53,17 @@ class ThemeService:
         )
 
         return BingoTheme(**theme)
+
+def build_call_prompt(theme: str, number: int, voice_style: str):
+
+    return f"""
+Theme: {theme}
+Voice style: {voice_style}
+
+Generate a bingo call for number {number}.
+
+Rules:
+- 1 short sentence
+- match voice style tone
+- family friendly
+"""
