@@ -61,3 +61,32 @@ Schema:
 "phrases":[]
 }
 """
+
+class ThemeService:
+
+    async def generate_theme(
+        self,
+        topic: str
+    ) -> BingoTheme:
+
+        response = await client.chat.completions.create(
+            model="gpt-4.1-mini",
+            response_format={"type": "json_object"},
+            messages=[
+                {
+                    "role": "system",
+                    "content": SYSTEM_PROMPT
+                },
+                {
+                    "role": "user",
+                    "content": topic
+                }
+            ],
+            temperature=0.9
+        )
+
+        theme = json.loads(
+            response.choices[0].message.content
+        )
+
+        return BingoTheme(**theme)
