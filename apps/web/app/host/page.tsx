@@ -50,6 +50,10 @@ const WINNING_PATTERN_HELP: Record<string, string> = {
   single_line: 'A player wins with any full row, column, or diagonal.',
   four_corners: 'A player wins by marking the four corner squares.',
   full_house: 'A player wins when the entire card is marked.',
+  x_pattern: 'A player wins by marking both diagonals to form an X.',
+  plus: 'A player wins by marking the middle row and middle column (a + shape).',
+  letter_t: 'A player wins by marking the top row and the middle column (a T shape).',
+  postage_stamp: 'A player wins by marking a 2x2 block in any corner.',
 }
 
 type AutomationForm = {
@@ -874,6 +878,10 @@ export default function HostDashboardPage() {
                               <option value="single_line">Single Line</option>
                               <option value="four_corners">Four Corners</option>
                               <option value="full_house">Full House</option>
+                              <option value="x_pattern">X Pattern</option>
+                              <option value="plus">Plus / Cross</option>
+                              <option value="letter_t">Letter T</option>
+                              <option value="postage_stamp">Postage Stamp</option>
                             </select>
                           </FieldHelp>
                           <FieldHelp label="Word set" help="Choose the words that fill player cards and the caller deck.">

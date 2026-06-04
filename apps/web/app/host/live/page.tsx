@@ -13,6 +13,7 @@ import { CalledWordsFeed } from '@/components/CalledWordsFeed'
 import { Leaderboard } from '@/components/Leaderboard'
 import { ActivityFeed } from '@/components/ActivityFeed'
 import { GameStatusBadge } from '@/components/GameStatusBadge'
+import { WinningPatternPreview } from '@/components/WinningPatternPreview'
 import { apiClient } from '@/lib/apiClient'
 import { mapActivityEvent, mapBingoPattern, mapClaimStatus, mapConnectionState, mapGameStatus, mapPlayerState } from '@/lib/uiMappers'
 import { useGameEvents } from '@/hooks/useGameEvents'
@@ -376,6 +377,8 @@ function HostLiveContent() {
                 </div>
               )}
             </section>
+
+            <WinningPatternPreview gamePattern={snapshot.winningPattern} />
           </div>
 
           <div className="col-span-1 lg:col-span-4 flex flex-col gap-5">
