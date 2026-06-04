@@ -89,3 +89,11 @@ def ai_theme_generate():
 
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
+
+from app.api.theme import router as theme_router
+
+app.include_router(
+    theme_router,
+    prefix="/theme",
+    tags=["theme"]
+)
