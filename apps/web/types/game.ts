@@ -2,7 +2,14 @@ export type GameState = 'Waiting' | 'Starting Soon' | 'Lobby Open' | 'Live' | 'P
 
 import { Player } from './player';
 
-export type BingoPattern = 'Line' | 'Four Corners' | 'Full House';
+export type BingoPattern =
+  | 'Line'
+  | 'Four Corners'
+  | 'Full House'
+  | 'X Pattern'
+  | 'Plus / Cross'
+  | 'Letter T'
+  | 'Postage Stamp';
 
 export interface BingoClaim {
   id: string;

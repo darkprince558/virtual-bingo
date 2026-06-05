@@ -7,9 +7,13 @@ import (
 )
 
 const (
-	PatternSingleLine  = "single_line"
-	PatternFourCorners = "four_corners"
-	PatternFullHouse   = "full_house"
+	PatternSingleLine   = "single_line"
+	PatternFourCorners  = "four_corners"
+	PatternFullHouse    = "full_house"
+	PatternXPattern     = "x_pattern"
+	PatternPlus         = "plus"
+	PatternLetterT      = "letter_t"
+	PatternPostageStamp = "postage_stamp"
 )
 
 var ErrUnsupportedPattern = errors.New("unsupported bingo pattern")
@@ -50,12 +54,26 @@ func NormalizePattern(pattern string) string {
 }
 
 func SupportedPatterns() []string {
-	return []string{PatternSingleLine, PatternFourCorners, PatternFullHouse}
+	return []string{
+		PatternSingleLine,
+		PatternFourCorners,
+		PatternFullHouse,
+		PatternXPattern,
+		PatternPlus,
+		PatternLetterT,
+		PatternPostageStamp,
+	}
 }
 
 func IsSupportedPattern(pattern string) bool {
 	switch NormalizePattern(pattern) {
-	case PatternSingleLine, PatternFourCorners, PatternFullHouse:
+	case PatternSingleLine,
+		PatternFourCorners,
+		PatternFullHouse,
+		PatternXPattern,
+		PatternPlus,
+		PatternLetterT,
+		PatternPostageStamp:
 		return true
 	default:
 		return false
@@ -167,6 +185,32 @@ func positionsForPattern(pattern string) [][][2]int {
 			}
 		}
 		return [][][2]int{all}
+	case PatternXPattern:
+		// Both diagonals form an X. The center (2,2) is shared, included once.
+		return [][][2]int{{
+			{0, 0}, {1, 1}, {2, 2}, {3, 3}, {4, 4},
+			{0, 4}, {1, 3}, {3, 1}, {4, 0},
+		}}
+	case PatternPlus:
+		// Middle row plus middle column form a +. Center included once.
+		return [][][2]int{{
+			{2, 0}, {2, 1}, {2, 2}, {2, 3}, {2, 4},
+			{0, 2}, {1, 2}, {3, 2}, {4, 2},
+		}}
+	case PatternLetterT:
+		// Top row plus middle column form a T.
+		return [][][2]int{{
+			{0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4},
+			{1, 2}, {2, 2}, {3, 2}, {4, 2},
+		}}
+	case PatternPostageStamp:
+		// A 2x2 block in any of the four corners qualifies.
+		return [][][2]int{
+			{{0, 0}, {0, 1}, {1, 0}, {1, 1}},
+			{{0, 3}, {0, 4}, {1, 3}, {1, 4}},
+			{{3, 0}, {3, 1}, {4, 0}, {4, 1}},
+			{{3, 3}, {3, 4}, {4, 3}, {4, 4}},
+		}
 	default:
 		return singleLinePositions()
 	}

@@ -96,6 +96,19 @@ export function mapBingoPattern(pattern?: string | null): BingoPattern {
     case 'full_house':
     case 'full house':
       return 'Full House'
+    case 'x_pattern':
+    case 'x pattern':
+    case 'x':
+      return 'X Pattern'
+    case 'plus':
+    case 'cross':
+      return 'Plus / Cross'
+    case 'letter_t':
+    case 'letter t':
+      return 'Letter T'
+    case 'postage_stamp':
+    case 'postage stamp':
+      return 'Postage Stamp'
     case 'single_line':
     case 'line':
     default:
