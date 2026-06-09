@@ -50,9 +50,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
               <div className="flex items-center gap-2.5">
                 <div
                   className="w-8 h-8 rounded-md flex items-center justify-center"
-                  style={{ background: '#FFF4F0' }}
+                  style={{ background: '#FFF0F3' }}
                 >
-                  <Smile className="w-4 h-4" style={{ color: '#FF5A1F' }} />
+                  <Smile className="w-4 h-4" style={{ color: '#E8002D' }} />
                 </div>
                 <h3 className="font-extrabold" style={{ color: '#1C1917' }}>Your Avatar</h3>
               </div>
@@ -82,9 +82,9 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                       onClick={() => { setAvatar(a); onClose(); }}
                       className="aspect-square rounded-lg text-2xl flex items-center justify-center transition-all"
                       style={{
-                        background: isSelected ? '#FFF4F0' : '#FAFAF9',
-                        border: isSelected ? '2px solid #FF5A1F' : '2px solid transparent',
-                        boxShadow: isSelected ? '0 4px 12px rgba(255,90,31,0.20)' : 'none',
+                        background: isSelected ? '#FFF0F3' : '#FAFAF9',
+                        border: isSelected ? '2px solid #E8002D' : '2px solid transparent',
+                        boxShadow: isSelected ? '0 4px 12px rgba(232,0,45,0.20)' : 'none',
                         transform: isSelected ? 'scale(1.08)' : 'scale(1)',
                       }}
                       aria-label={`Select avatar ${a}`}
@@ -104,7 +104,7 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
             >
               <div
                 className="w-10 h-10 rounded-lg flex items-center justify-center text-2xl"
-                style={{ background: '#FFF4F0', border: '2px solid #FFE4D9' }}
+                style={{ background: '#FFF0F3', border: '2px solid #FFE4D9' }}
               >
                 {avatar}
               </div>

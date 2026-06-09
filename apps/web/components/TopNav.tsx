@@ -46,21 +46,23 @@ export function TopNav({ gameId, gameCode, playerName, status, role, connectionS
           borderBottom: '1px solid rgba(231, 229, 228, 0.7)',
         }}
       >
-        {/* Left: Logo + Game Code */}
+        {/* Left: CGI Logo + Game Code */}
         <div className="flex items-center gap-3 sm:gap-5">
           <Link href="/" className="flex items-center gap-2.5 group">
+            {/* CGI wordmark logo */}
             <div
-              className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-black text-lg shrink-0 transition-transform group-hover:scale-105"
+              className="h-9 px-2.5 rounded-lg flex items-center justify-center shrink-0 transition-transform group-hover:scale-105"
               style={{
-                background: 'linear-gradient(135deg, #FF7A42 0%, #FF5A1F 100%)',
-                boxShadow: '0 4px 12px rgba(255, 90, 31, 0.35)',
+                background: 'linear-gradient(135deg, #E8002D 0%, #7B1FA2 100%)',
+                boxShadow: '0 4px 12px rgba(232, 0, 45, 0.35)',
               }}
             >
-              B
+              <span className="text-white font-black text-sm tracking-widest select-none">CGI</span>
             </div>
-            <span className="text-base font-black tracking-tight hidden sm:inline-block" style={{ color: '#1C1917' }}>
-              Virtual Bingo
-            </span>
+            <div className="hidden sm:flex flex-col leading-none">
+              <span className="text-[11px] font-bold uppercase tracking-widest" style={{ color: '#E8002D' }}>Virtual</span>
+              <span className="text-base font-black tracking-tight" style={{ color: '#1C1917' }}>Bingo</span>
+            </div>
           </Link>
 
           {gameCode && (
@@ -70,7 +72,7 @@ export function TopNav({ gameId, gameCode, playerName, status, role, connectionS
                 <span className="hidden sm:inline text-xs font-bold uppercase tracking-widest" style={{ color: '#A8A29E' }}>Code</span>
                 <span
                   className="px-3 py-1 rounded-full text-sm font-black tracking-widest"
-                  style={{ background: '#FFF4F0', color: '#E8440A', letterSpacing: '0.12em' }}
+                  style={{ background: '#FFF0F3', color: '#E8002D', letterSpacing: '0.12em' }}
                 >
                   {gameCode}
                 </span>
@@ -119,13 +121,13 @@ export function TopNav({ gameId, gameCode, playerName, status, role, connectionS
               <div
                 className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-lg select-none overflow-hidden"
                 style={{
-                  background: role === 'host' ? 'linear-gradient(135deg, #7C5CFC, #9E80FF)' : '#FFF4F0',
-                  border: role === 'host' ? 'none' : '2px solid #FFC5A8',
+                  background: role === 'host' ? 'linear-gradient(135deg, #E8002D, #7B1FA2)' : '#FFF0F3',
+                  border: role === 'host' ? 'none' : '2px solid #FFB0C0',
                 }}
               >
                 {role === 'host'
                   ? <Shield className="w-4 h-4 text-white" />
-                  : <span style={{ color: '#E8440A' }}>{avatar}</span>
+                  : <span style={{ color: '#C40026' }}>{avatar}</span>
                 }
               </div>
             </div>

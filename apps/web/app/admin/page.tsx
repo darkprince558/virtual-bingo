@@ -34,11 +34,11 @@ export default function AdminDashboard() {
         {/* Stats grid */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mb-8">
           {[
-            { icon: CalendarClock, label: 'Games This Month', value: stats.totalGamesThisMonth, color: '#FF5A1F', bg: '#FFF4F0' },
+            { icon: CalendarClock, label: 'Games This Month', value: stats.totalGamesThisMonth, color: '#E8002D', bg: '#FFF0F3' },
             { icon: Radio, label: 'Active Now', value: stats.activeGamesNow, color: '#22AA6A', bg: '#EDFAF5' },
             { icon: Users, label: 'Total Players', value: stats.totalPlayers, color: '#7C5CFC', bg: '#F5F2FF' },
             { icon: Shield, label: 'Host Requests', value: stats.pendingHostRequests, color: '#F59E0B', bg: '#FFFBEB' },
-            { icon: Mic, label: 'Voice Pending', value: stats.pendingVoiceApprovals, color: '#E8440A', bg: '#FFF4F0' },
+            { icon: Mic, label: 'Voice Pending', value: stats.pendingVoiceApprovals, color: '#C40026', bg: '#FFF0F3' },
             { icon: Gift, label: 'Rewards Sent', value: stats.rewardsFulfilled, color: '#22AA6A', bg: '#EDFAF5' },
           ].map((s, i) => (
             <motion.div key={s.label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 + i * 0.04 }} className="rounded-lg p-4 flex flex-col items-center gap-2" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 12px rgba(0,0,0,0.03)' }}>

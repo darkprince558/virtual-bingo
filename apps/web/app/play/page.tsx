@@ -336,15 +336,15 @@ function PlayContent() {
                 exit={{ opacity: 0, y: -20, scale: 0.95 }}
                 className="shrink-0 flex items-center justify-center gap-3 py-3 rounded-lg relative overflow-hidden"
                 style={{
-                  background: 'linear-gradient(135deg, #FFF4F0 0%, #FFE4D9 100%)',
-                  border: '2px solid #FFC5A8',
+                  background: 'linear-gradient(135deg, #FFF0F3 0%, #FFE4D9 100%)',
+                  border: '2px solid #FFB0C0',
                 }}
               >
                 {/* Animated shimmer */}
                 <div
                   className="absolute inset-0 animate-shimmer-glow pointer-events-none"
                   style={{
-                    background: 'linear-gradient(90deg, transparent, rgba(255,90,31,0.08), transparent)',
+                    background: 'linear-gradient(90deg, transparent, rgba(232,0,45,0.08), transparent)',
                     backgroundSize: '200% 100%',
                   }}
                 />
@@ -352,9 +352,9 @@ function PlayContent() {
                   animate={{ rotate: [0, 15, -15, 0] }}
                   transition={{ duration: 0.6, repeat: Infinity, repeatDelay: 1.5 }}
                 >
-                  <Zap className="w-5 h-5" style={{ color: '#FF5A1F' }} />
+                  <Zap className="w-5 h-5" style={{ color: '#E8002D' }} />
                 </motion.div>
-                <span className="text-sm font-extrabold relative z-10" style={{ color: '#E8440A' }}>
+                <span className="text-sm font-extrabold relative z-10" style={{ color: '#C40026' }}>
                   You&apos;re so close to BINGO!
                 </span>
                 <BingoCharacter mood="excited" size={36} />
@@ -393,7 +393,7 @@ function PlayContent() {
           {/* Claim BINGO Button */}
           {(isCloseToBingo || claimReadiness?.ready) && (
             <div className="shrink-0 pb-2">
-              <div className="max-w-2xl mx-auto mb-3 rounded-lg p-4" style={{ background: claimReadiness?.ready ? '#EDFAF5' : '#FFF4F0', border: `1.5px solid ${claimReadiness?.ready ? '#A8EBCC' : '#FFE4D9'}` }}>
+              <div className="max-w-2xl mx-auto mb-3 rounded-lg p-4" style={{ background: claimReadiness?.ready ? '#EDFAF5' : '#FFF0F3', border: `1.5px solid ${claimReadiness?.ready ? '#A8EBCC' : '#FFE4D9'}` }}>
               <p className="text-sm font-extrabold" style={{ color: claimReadiness?.ready ? '#116B3F' : '#C23208' }}>
                 {isCheckingReadiness
                   ? 'Checking claim readiness...'
@@ -414,7 +414,7 @@ function PlayContent() {
               whileTap={{ scale: 0.97 }}
               whileHover={{ scale: 1.02, y: -2 }}
               animate={isCloseToBingo
-                ? { boxShadow: ['0 6px 20px rgba(255,90,31,0.30)', '0 10px 30px rgba(255,90,31,0.55)', '0 6px 20px rgba(255,90,31,0.30)'] }
+                ? { boxShadow: ['0 6px 20px rgba(232,0,45,0.30)', '0 10px 30px rgba(232,0,45,0.55)', '0 6px 20px rgba(232,0,45,0.30)'] }
                 : {}
               }
               transition={isCloseToBingo
@@ -423,9 +423,9 @@ function PlayContent() {
               }
               className="w-full max-w-2xl mx-auto flex items-center justify-center gap-3 py-4 sm:py-5 rounded-xl font-black text-base sm:text-lg transition-all relative overflow-hidden"
               style={{
-                background: 'linear-gradient(135deg, #FF7A42 0%, #FF5A1F 100%)',
+                background: 'linear-gradient(135deg, #C0003D 0%, #E8002D 100%)',
                 color: '#FFFFFF',
-                boxShadow: '0 6px 24px rgba(255, 90, 31, 0.35)',
+                boxShadow: '0 6px 24px rgba(232, 0, 45, 0.35)',
                 opacity: isSubmitting ? 0.7 : 1,
               }}
               aria-label="Claim bingo"

@@ -56,15 +56,15 @@ export function BingoCell({ word, isMarked, onClick, disabled, isFreeSpace, isCu
             }
           : isMarked
             ? {
-                background: 'linear-gradient(135deg, #FF7A42 0%, #FF5A1F 60%, #E8440A 100%)',
-                border: '2px solid #FF5A1F',
-                boxShadow: '0 6px 20px rgba(255, 90, 31, 0.40), inset 0 1px 0 rgba(255,255,255,0.15)',
+                background: 'linear-gradient(135deg, #C0003D 0%, #E8002D 60%, #C40026 100%)',
+                border: '2px solid #E8002D',
+                boxShadow: '0 6px 20px rgba(232, 0, 45, 0.40), inset 0 1px 0 rgba(255,255,255,0.15)',
               }
             : isCurrentWord
               ? {
-                  background: 'linear-gradient(135deg, #FFF4F0 0%, #FFE4D9 100%)',
-                  border: '2px solid #FFC5A8',
-                  boxShadow: '0 2px 12px rgba(255, 90, 31, 0.15)',
+                  background: 'linear-gradient(135deg, #FFF0F3 0%, #FFE4D9 100%)',
+                  border: '2px solid #FFB0C0',
+                  boxShadow: '0 2px 12px rgba(232, 0, 45, 0.15)',
                 }
               : {
                   background: '#FFFFFF',
@@ -84,7 +84,7 @@ export function BingoCell({ word, isMarked, onClick, disabled, isFreeSpace, isCu
               : 'text-[9px] sm:text-[11px] font-bold'
         )}
         style={{
-          color: isFreeSpace ? '#6440E8' : isMarked ? '#FFFFFF' : isCurrentWord ? '#E8440A' : '#44403C',
+          color: isFreeSpace ? '#6440E8' : isMarked ? '#FFFFFF' : isCurrentWord ? '#C40026' : '#44403C',
         }}
       >
         {word}
@@ -134,7 +134,7 @@ export function BingoCell({ word, isMarked, onClick, disabled, isFreeSpace, isCu
           animate={{ opacity: [0.3, 0.6, 0.3] }}
           transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
           style={{
-            background: 'linear-gradient(135deg, rgba(255,164,112,0.12), rgba(255,90,31,0.08))',
+            background: 'linear-gradient(135deg, rgba(255,164,112,0.12), rgba(232,0,45,0.08))',
           }}
         />
       )}
@@ -143,7 +143,7 @@ export function BingoCell({ word, isMarked, onClick, disabled, isFreeSpace, isCu
       {!isMarked && !isFreeSpace && !disabled && (
         <span
           className="absolute inset-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 pointer-events-none z-0"
-          style={{ background: 'linear-gradient(135deg, rgba(255,164,112,0.12), rgba(255,90,31,0.10))' }}
+          style={{ background: 'linear-gradient(135deg, rgba(255,164,112,0.12), rgba(232,0,45,0.10))' }}
         />
       )}
 

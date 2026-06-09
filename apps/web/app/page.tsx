@@ -41,12 +41,15 @@ export default function LandingPage() {
         <div className="flex items-center gap-2.5">
           <motion.div
             whileHover={{ scale: 1.08, rotate: 3 }}
-            className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-black text-lg"
-            style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)', boxShadow: '0 4px 12px rgba(255,90,31,0.30)' }}
+            className="h-9 px-2.5 rounded-lg flex items-center justify-center text-white font-black text-sm tracking-widest"
+            style={{ background: 'linear-gradient(135deg, #E8002D, #7B1FA2)', boxShadow: '0 4px 12px rgba(232,0,45,0.30)' }}
           >
-            B
+            CGI
           </motion.div>
-          <span className="font-black text-lg tracking-tight" style={{ color: '#1C1917' }}>Virtual Bingo</span>
+          <div className="flex flex-col leading-none">
+            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#E8002D' }}>Virtual</span>
+            <span className="font-black text-base tracking-tight" style={{ color: '#1C1917' }}>Bingo</span>
+          </div>
         </div>
         <div className="flex items-center gap-4">
           <LanguageToggle />
@@ -83,17 +86,18 @@ export default function LandingPage() {
                 <BingoCharacter mood="excited" size={90} />
               </motion.div>
 
-              {/* Big icon */}
+              {/* Big CGI icon */}
               <motion.div
                 animate={{ y: [0, -10, 0] }}
                 transition={{ duration: 4, repeat: Infinity, ease: 'easeInOut' }}
-                className="inline-flex items-center justify-center w-24 h-24 rounded-2xl"
+                className="inline-flex flex-col items-center justify-center w-24 h-24 rounded-2xl gap-0.5"
                 style={{
-                  background: 'linear-gradient(135deg, #FF7A42 0%, #FF5A1F 50%, #E8440A 100%)',
-                  boxShadow: '0 12px 40px rgba(255, 90, 31, 0.35)',
+                  background: 'linear-gradient(135deg, #E8002D 0%, #7B1FA2 100%)',
+                  boxShadow: '0 12px 40px rgba(232, 0, 45, 0.35)',
                 }}
               >
-                <span className="text-5xl font-black text-white select-none">B</span>
+                <span className="text-xl font-black text-white tracking-widest select-none leading-none">CGI</span>
+                <span className="text-xs font-bold text-white/70 tracking-widest select-none leading-none uppercase">Bingo</span>
               </motion.div>
 
               {/* Second character on right */}
@@ -108,7 +112,9 @@ export default function LandingPage() {
 
             <h1 className="text-5xl sm:text-6xl font-black tracking-tight mb-4" style={{ color: '#1C1917', lineHeight: 1.1 }}>
               {t('home.title', 'Virtual').split(' ')[0]}<br />
-              <span style={{ color: '#FF5A1F' }}>{t('home.title', 'Virtual Bingo').substring(t('home.title', 'Virtual Bingo').indexOf(' ') + 1)}</span>
+              <span style={{ background: 'linear-gradient(135deg, #E8002D, #7B1FA2)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
+                {t('home.title', 'Virtual Bingo').substring(t('home.title', 'Virtual Bingo').indexOf(' ') + 1)}
+              </span>
             </h1>
             <p className="text-base sm:text-lg font-semibold max-w-sm mx-auto leading-relaxed" style={{ color: '#78716C' }}>
               {t('home.subtitle', 'Centralized cards, live word calls, and real-time leaderboards for your next team event.')}
@@ -131,7 +137,7 @@ export default function LandingPage() {
             <div
               className="absolute top-0 right-0 w-24 h-24 pointer-events-none"
               style={{
-                background: 'radial-gradient(circle at top right, rgba(124,92,252,0.06) 0%, transparent 70%)',
+                background: 'radial-gradient(circle at top right, rgba(232,0,45,0.06) 0%, transparent 70%)',
               }}
             />
 
@@ -192,7 +198,7 @@ export default function LandingPage() {
                     color: '#1C1917',
                     fontFamily: 'inherit',
                   }}
-                  onFocus={e => { e.target.style.border = '1.5px solid #FF5A1F'; e.target.style.background = '#FFFFFF'; e.target.style.boxShadow = '0 0 0 4px rgba(255,90,31,0.08)'; }}
+                  onFocus={e => { e.target.style.border = '1.5px solid #E8002D'; e.target.style.background = '#FFFFFF'; e.target.style.boxShadow = '0 0 0 4px rgba(232,0,45,0.08)'; }}
                   onBlur={e => { e.target.style.border = '1.5px solid #E7E5E4'; e.target.style.background = '#FAF8F5'; e.target.style.boxShadow = 'none'; }}
                 />
               </motion.div>
@@ -218,7 +224,7 @@ export default function LandingPage() {
                     letterSpacing: '0.15em',
                     fontFamily: 'inherit',
                   }}
-                  onFocus={e => { e.target.style.border = '1.5px solid #FF5A1F'; e.target.style.background = '#FFFFFF'; e.target.style.boxShadow = '0 0 0 4px rgba(255,90,31,0.08)'; }}
+                  onFocus={e => { e.target.style.border = '1.5px solid #E8002D'; e.target.style.background = '#FFFFFF'; e.target.style.boxShadow = '0 0 0 4px rgba(232,0,45,0.08)'; }}
                   onBlur={e => { e.target.style.border = '1.5px solid #E7E5E4'; e.target.style.background = '#FAF8F5'; e.target.style.boxShadow = 'none'; }}
                 />
                 <motion.button
@@ -229,9 +235,9 @@ export default function LandingPage() {
                   aria-label="Join game"
                   className="flex items-center justify-center gap-2 px-6 rounded-xl font-extrabold text-sm transition-all"
                   style={{
-                    background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)',
+                    background: 'linear-gradient(135deg, #C0003D, #E8002D)',
                     color: '#FFFFFF',
-                    boxShadow: '0 4px 16px rgba(255,90,31,0.35)',
+                    boxShadow: '0 4px 16px rgba(232,0,45,0.35)',
                     minWidth: '90px',
                   }}
                 >
@@ -250,7 +256,7 @@ export default function LandingPage() {
             className="mt-6 grid grid-cols-3 gap-3"
           >
             {[
-              { icon: <Target className="w-6 h-6" style={{ color: '#FF5A1F' }} />, label: t('home.feature_cards', 'Live Cards'), desc: t('home.feature_cards_desc', 'Auto-generated') },
+              { icon: <Target className="w-6 h-6" style={{ color: '#E8002D' }} />, label: t('home.feature_cards', 'Live Cards'), desc: t('home.feature_cards_desc', 'Auto-generated') },
               { icon: <Trophy className="w-6 h-6" style={{ color: '#F59E0B' }} />, label: t('home.feature_leaderboard', 'Leaderboard'), desc: t('home.feature_leaderboard_desc', 'Real-time') },
               { icon: <Bot className="w-6 h-6" style={{ color: '#7C5CFC' }} />, label: t('home.feature_ai', 'AI Host'), desc: t('home.feature_ai_desc', 'Commentary') },
             ].map((f, i) => (

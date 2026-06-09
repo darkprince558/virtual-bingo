@@ -37,7 +37,7 @@ function TrophyIcon({ placement }: { placement: number }) {
 const PLACE_STYLES: Record<number, { bg: string; text: string; border: string; glowColor: string }> = {
   1: { bg: '#FEF3C7', text: '#B45309', border: '#FCD34D', glowColor: 'rgba(251,191,36,0.3)' },
   2: { bg: '#F4F2EF', text: '#57534E', border: '#D6D3D1', glowColor: 'rgba(168,162,158,0.15)' },
-  3: { bg: '#FFF4F0', text: '#C23208', border: '#FFC5A8', glowColor: 'rgba(255,90,31,0.15)' },
+  3: { bg: '#FFF0F3', text: '#C23208', border: '#FFB0C0', glowColor: 'rgba(232,0,45,0.15)' },
 }
 
 function getInitials(name: string) {

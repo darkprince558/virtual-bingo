@@ -96,8 +96,8 @@ export function GameInfoModal({ isOpen, onClose, gameId }: GameInfoModalProps) {
                 <div
                   className="w-9 h-9 rounded-lg flex items-center justify-center text-white"
                   style={{
-                    background: 'linear-gradient(135deg, #FF7A42 0%, #FF5A1F 100%)',
-                    boxShadow: '0 4px 12px rgba(255, 90, 31, 0.25)',
+                    background: 'linear-gradient(135deg, #C0003D 0%, #E8002D 100%)',
+                    boxShadow: '0 4px 12px rgba(232, 0, 45, 0.25)',
                   }}
                 >
                   <Info className="w-4.5 h-4.5" />
@@ -134,8 +134,8 @@ export function GameInfoModal({ isOpen, onClose, gameId }: GameInfoModalProps) {
                     onClick={() => setActiveTab(tab)}
                     className="flex-1 py-3 px-2 flex items-center justify-center gap-1.5 text-xs font-black uppercase tracking-wider transition-all border-b-2 rounded-t-lg"
                     style={{
-                      borderColor: isActive ? '#FF5A1F' : 'transparent',
-                      color: isActive ? '#FF5A1F' : '#878684',
+                      borderColor: isActive ? '#E8002D' : 'transparent',
+                      color: isActive ? '#E8002D' : '#878684',
                     }}
                   >
                     {labels[tab].icon}
@@ -149,7 +149,7 @@ export function GameInfoModal({ isOpen, onClose, gameId }: GameInfoModalProps) {
             <div className="flex-1 p-6 overflow-y-auto" style={{ overscrollBehavior: 'contain' }}>
               {isLoading && (
                 <div className="flex flex-col items-center justify-center py-16 gap-3">
-                  <div className="w-8 h-8 rounded-full border-4 border-stone-200 border-t-[#FF5A1F] animate-spin" />
+                  <div className="w-8 h-8 rounded-full border-4 border-stone-200 border-t-[#E8002D] animate-spin" />
                   <p className="text-sm font-bold text-[#A8A29E]">Fetching game settings...</p>
                 </div>
               )}
@@ -186,9 +186,9 @@ export function GameInfoModal({ isOpen, onClose, gameId }: GameInfoModalProps) {
                       </div>
 
                       {content?.callerStyle && (
-                        <div className="rounded-xl p-4 bg-[#FFF4F0] border border-[#FFE4D9]">
-                          <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#FF5A1F]">AI Host Personality</span>
-                          <p className="text-sm font-bold mt-1 text-[#E8440A]">
+                        <div className="rounded-xl p-4 bg-[#FFF0F3] border border-[#FFE4D9]">
+                          <span className="text-[10px] font-extrabold uppercase tracking-widest text-[#E8002D]">AI Host Personality</span>
+                          <p className="text-sm font-bold mt-1 text-[#C40026]">
                             {content.callerStyle}
                           </p>
                         </div>
@@ -288,7 +288,7 @@ export function GameInfoModal({ isOpen, onClose, gameId }: GameInfoModalProps) {
               style={{ borderTop: '1px solid rgba(244, 242, 239, 0.9)', background: '#FCFAF7' }}
             >
               <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#A8A29E]">
-                <Sparkles className="w-3.5 h-3.5 text-[#FF5A1F] animate-pulse" />
+                <Sparkles className="w-3.5 h-3.5 text-[#E8002D] animate-pulse" />
                 <span>POWERED BY AI CONDUCTOR</span>
               </div>
               <button

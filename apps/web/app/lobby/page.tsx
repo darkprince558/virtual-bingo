@@ -20,7 +20,7 @@ function getInitials(name: string) {
 }
 
 const AVATAR_COLORS = [
-  { bg: '#FFF4F0', text: '#E8440A', border: '#FFE4D9' },
+  { bg: '#FFF0F3', text: '#C40026', border: '#FFE4D9' },
   { bg: '#F5F2FF', text: '#6440E8', border: '#D9CCFF' },
   { bg: '#EDFAF5', text: '#116B3F', border: '#A8EBCC' },
   { bg: '#FEF3C7', text: '#B45309', border: '#FDE68A' },
@@ -183,9 +183,9 @@ function LobbyContent() {
                 <p className="text-[10px] font-extrabold uppercase tracking-widest" style={{ color: '#A8A29E' }}>Game Code</p>
                 <div
                   className="px-8 py-4 rounded-xl"
-                  style={{ background: '#FFF4F0', border: '2px solid #FFE4D9' }}
+                  style={{ background: '#FFF0F3', border: '2px solid #FFE4D9' }}
                 >
-                  <span className="text-3xl font-black tracking-[0.2em]" style={{ color: '#FF5A1F', letterSpacing: '0.2em' }}>
+                  <span className="text-3xl font-black tracking-[0.2em]" style={{ color: '#E8002D', letterSpacing: '0.2em' }}>
                     {game.code}
                   </span>
                 </div>
@@ -289,9 +289,9 @@ function LobbyContent() {
                   id="confirmJoinBtn"
                   className="flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-extrabold text-base transition-all"
                   style={{
-                    background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)',
+                    background: 'linear-gradient(135deg, #C0003D, #E8002D)',
                     color: '#FFFFFF',
-                    boxShadow: '0 6px 20px rgba(255,90,31,0.35)',
+                    boxShadow: '0 6px 20px rgba(232,0,45,0.35)',
                   }}
                 >
                   <Clock className="w-5 h-5" />

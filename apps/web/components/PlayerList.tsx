@@ -13,7 +13,7 @@ function getInitials(name: string) {
 const STATE_CHIP: Record<string, { bg: string; text: string }> = {
   Playing:          { bg: '#EDFAF5', text: '#116B3F' },
   Waiting:          { bg: '#FEF3C7', text: '#D97706' },
-  'Claimed Bingo':  { bg: '#FFF4F0', text: '#E8440A' },
+  'Claimed Bingo':  { bg: '#FFF0F3', text: '#C40026' },
   'Confirmed Winner': { bg: '#EDFAF5', text: '#116B3F' },
   'Rejected Claim': { bg: '#FFF1F2', text: '#E11D48' },
   Disconnected:     { bg: '#F4F2EF', text: '#A8A29E' },
@@ -21,7 +21,7 @@ const STATE_CHIP: Record<string, { bg: string; text: string }> = {
 
 // Warm color palette for avatars (cycles through)
 const AVATAR_COLORS = [
-  { bg: '#FFF4F0', text: '#E8440A' },
+  { bg: '#FFF0F3', text: '#C40026' },
   { bg: '#F5F2FF', text: '#6440E8' },
   { bg: '#EDFAF5', text: '#116B3F' },
   { bg: '#FEF3C7', text: '#B45309' },

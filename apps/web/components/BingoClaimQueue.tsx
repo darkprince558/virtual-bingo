@@ -51,7 +51,7 @@ export function BingoClaimQueue({ claims, onApprove, onReject }: BingoClaimQueue
         {pendingClaims.length > 0 && (
           <div
             className="ml-auto w-6 h-6 rounded-full flex items-center justify-center text-xs font-black"
-            style={{ background: '#FF5A1F', color: '#FFFFFF' }}
+            style={{ background: '#E8002D', color: '#FFFFFF' }}
           >
             {pendingClaims.length}
           </div>
@@ -89,7 +89,7 @@ export function BingoClaimQueue({ claims, onApprove, onReject }: BingoClaimQueue
                     {/* Avatar */}
                     <div
                       className="w-9 h-9 rounded-md flex items-center justify-center text-sm font-black shrink-0"
-                      style={{ background: '#FFF4F0', color: '#E8440A', border: '1.5px solid #FFE4D9' }}
+                      style={{ background: '#FFF0F3', color: '#C40026', border: '1.5px solid #FFE4D9' }}
                     >
                       {getInitials(claim.playerName)}
                     </div>

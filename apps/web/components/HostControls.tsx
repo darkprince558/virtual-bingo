@@ -29,10 +29,10 @@ export function HostControls({ status, onStart, onNextWord, onPause, onEnd, vari
 
   const BUTTON_STYLES = {
     primary: {
-      background: 'linear-gradient(135deg, #FF7A42 0%, #FF5A1F 100%)',
+      background: 'linear-gradient(135deg, #C0003D 0%, #E8002D 100%)',
       color: '#FFFFFF',
       border: 'none',
-      boxShadow: '0 4px 16px rgba(255, 90, 31, 0.35)',
+      boxShadow: '0 4px 16px rgba(232, 0, 45, 0.35)',
     },
     secondary: {
       background: '#FFFFFF',
@@ -97,7 +97,7 @@ export function HostControls({ status, onStart, onNextWord, onPause, onEnd, vari
           }}
     >
       <div className="flex items-center gap-2 mb-4">
-        <ChevronRight className="w-4 h-4" style={{ color: '#FF5A1F' }} />
+        <ChevronRight className="w-4 h-4" style={{ color: '#E8002D' }} />
         <span className="text-xs font-extrabold uppercase tracking-widest" style={{ color: '#A8A29E' }}>
           Game Controls
         </span>

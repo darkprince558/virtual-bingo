@@ -54,8 +54,8 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
 
   const navItems = role === 'admin' ? ADMIN_NAV : HOST_NAV
   const roleLabel = role === 'admin' ? t('dashboard.admin_center', 'Admin Center') : t('dashboard.title', 'Host Dashboard')
-  const roleBg = role === 'admin' ? 'linear-gradient(135deg, #7C5CFC, #9E80FF)' : 'linear-gradient(135deg, #FF7A42, #FF5A1F)'
-  const roleGlow = role === 'admin' ? 'rgba(124,92,252,0.30)' : 'rgba(255,90,31,0.30)'
+  const roleBg = role === 'admin' ? 'linear-gradient(135deg, #7C5CFC, #9E80FF)' : 'linear-gradient(135deg, #C0003D, #E8002D)'
+  const roleGlow = role === 'admin' ? 'rgba(124,92,252,0.30)' : 'rgba(232,0,45,0.30)'
 
   function isActive(href: string) {
     if (href === '/host' || href === '/admin') return pathname === href
@@ -70,8 +70,8 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
         onClick={() => setMobileOpen(false)}
         className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-bold transition-all relative group"
         style={{
-          background: active ? (role === 'admin' ? '#F5F2FF' : '#FFF4F0') : 'transparent',
-          color: active ? (role === 'admin' ? '#6440E8' : '#E8440A') : '#78716C',
+          background: active ? (role === 'admin' ? '#F5F2FF' : '#FFF0F3') : 'transparent',
+          color: active ? (role === 'admin' ? '#6440E8' : '#C40026') : '#78716C',
         }}
       >
         <item.icon className="w-[18px] h-[18px] shrink-0" />
@@ -81,7 +81,7 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
             className="text-[10px] font-black px-2 py-0.5 rounded-full"
             style={{
               background: role === 'admin' ? '#EDE5FF' : '#FFE4D9',
-              color: role === 'admin' ? '#6440E8' : '#E8440A',
+              color: role === 'admin' ? '#6440E8' : '#C40026',
             }}
           >
             {item.badge}
@@ -91,7 +91,7 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
           <motion.div
             layoutId="activeNav"
             className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-6 rounded-full"
-            style={{ background: role === 'admin' ? '#7C5CFC' : '#FF5A1F' }}
+            style={{ background: role === 'admin' ? '#7C5CFC' : '#E8002D' }}
             transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           />
         )}
@@ -130,7 +130,7 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
           <Link href="/" className="flex items-center gap-2.5 group mb-5">
             <div
               className="w-9 h-9 rounded-lg flex items-center justify-center text-white font-black text-lg shrink-0 transition-transform group-hover:scale-105"
-              style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)', boxShadow: '0 4px 12px rgba(255,90,31,0.30)' }}
+              style={{ background: 'linear-gradient(135deg, #C0003D, #E8002D)', boxShadow: '0 4px 12px rgba(232,0,45,0.30)' }}
             >
               B
             </div>
@@ -142,7 +142,7 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
           {/* Role badge */}
           <div
             className="flex items-center gap-2.5 px-4 py-3 rounded-lg"
-            style={{ background: role === 'admin' ? '#F5F2FF' : '#FFF4F0' }}
+            style={{ background: role === 'admin' ? '#F5F2FF' : '#FFF0F3' }}
           >
             <div
               className="w-8 h-8 rounded-md flex items-center justify-center"
@@ -189,7 +189,7 @@ export function DashboardShell({ children, role, userName }: DashboardShellProps
         <Link href="/" className="flex items-center gap-2">
           <div
             className="w-8 h-8 rounded-md flex items-center justify-center text-white font-black text-sm"
-            style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)' }}
+            style={{ background: 'linear-gradient(135deg, #C0003D, #E8002D)' }}
           >
             B
           </div>

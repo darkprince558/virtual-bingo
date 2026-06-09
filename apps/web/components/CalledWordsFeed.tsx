@@ -62,7 +62,7 @@ export function CalledWordsFeed({ words }: CalledWordsFeedProps) {
                 transition={{ type: 'spring', stiffness: 300, damping: 25 }}
                 className="flex items-center justify-between px-3.5 py-2.5 rounded-md transition-all relative overflow-hidden"
                 style={{
-                  background: i === 0 ? '#FFF4F0' : '#FAFAF9',
+                  background: i === 0 ? '#FFF0F3' : '#FAFAF9',
                   border: i === 0 ? '1.5px solid #FFE4D9' : '1.5px solid transparent',
                 }}
               >
@@ -72,7 +72,7 @@ export function CalledWordsFeed({ words }: CalledWordsFeedProps) {
                     className="absolute inset-0 pointer-events-none"
                     animate={{ opacity: [0.1, 0.3, 0.1] }}
                     transition={{ duration: 2, repeat: Infinity }}
-                    style={{ background: 'linear-gradient(135deg, rgba(255,90,31,0.08), transparent)' }}
+                    style={{ background: 'linear-gradient(135deg, rgba(232,0,45,0.08), transparent)' }}
                   />
                 )}
 
@@ -80,13 +80,13 @@ export function CalledWordsFeed({ words }: CalledWordsFeedProps) {
                   {/* Call number */}
                   <span
                     className="text-[9px] font-black w-5 text-center shrink-0"
-                    style={{ color: i === 0 ? '#FF5A1F' : '#D6D3D1' }}
+                    style={{ color: i === 0 ? '#E8002D' : '#D6D3D1' }}
                   >
                     #{reversed.length - i}
                   </span>
                   <span
                     className="text-sm font-bold leading-tight"
-                    style={{ color: i === 0 ? '#E8440A' : '#44403C' }}
+                    style={{ color: i === 0 ? '#C40026' : '#44403C' }}
                   >
                     {w.word}
                   </span>

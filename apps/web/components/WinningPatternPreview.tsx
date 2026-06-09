@@ -19,7 +19,7 @@ interface WinningPatternPreviewProps {
 }
 
 const BINGO_LETTERS = ['B', 'I', 'N', 'G', 'O']
-const LETTER_COLORS = ['#FF5A1F', '#7C5CFC', '#22AA6A', '#FBBF24', '#F43F5E']
+const LETTER_COLORS = ['#E8002D', '#7C5CFC', '#22AA6A', '#FBBF24', '#F43F5E']
 
 export function WinningPatternPreview({ gamePattern, onSelect }: WinningPatternPreviewProps) {
   const gameShape = resolveWinningPattern(gamePattern)
@@ -61,9 +61,9 @@ export function WinningPatternPreview({ gamePattern, onSelect }: WinningPatternP
               aria-pressed={isSelected}
               className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-extrabold transition-all active:scale-95"
               style={{
-                background: isSelected ? '#FFF4F0' : '#FAFAF9',
-                color: isSelected ? '#E8440A' : '#78716C',
-                border: isSelected ? '1.5px solid #FFC5A8' : '1.5px solid #F0EDE8',
+                background: isSelected ? '#FFF0F3' : '#FAFAF9',
+                color: isSelected ? '#C40026' : '#78716C',
+                border: isSelected ? '1.5px solid #FFB0C0' : '1.5px solid #F0EDE8',
               }}
             >
               {pattern.label}
@@ -115,9 +115,9 @@ export function WinningPatternPreview({ gamePattern, onSelect }: WinningPatternP
                   style={
                     active
                       ? {
-                          background: 'linear-gradient(135deg, #FF7A42 0%, #FF5A1F 60%, #E8440A 100%)',
-                          border: '1.5px solid #FF5A1F',
-                          boxShadow: '0 4px 14px rgba(255, 90, 31, 0.35)',
+                          background: 'linear-gradient(135deg, #C0003D 0%, #E8002D 60%, #C40026 100%)',
+                          border: '1.5px solid #E8002D',
+                          boxShadow: '0 4px 14px rgba(232, 0, 45, 0.35)',
                         }
                       : {
                           background: '#FAFAF9',
