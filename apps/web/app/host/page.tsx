@@ -343,11 +343,22 @@ export default function HostDashboardPage() {
       const players = parseAllowedPlayers(automationForm.players)
       if (players.length > 0) {
         setAutomationProgress('Adding players')
-        const allowed = await apiClient<AllowedPlayerResponse[]>(`/games/${run.id}/allowed-players/bulk`, {
-          method: 'POST',
-          devUserRole: 'host',
-          body: JSON.stringify(players),
-        })
+        let allowed: AllowedPlayerResponse[]
+        try {
+          allowed = await apiClient<AllowedPlayerResponse[]>(`/games/${run.id}/allowed-players/bulk`, {
+            method: 'POST',
+            devUserRole: 'host',
+            body: JSON.stringify(players),
+          })
+        } catch (err) {
+          if (err instanceof Error && err.message.includes('already exists')) {
+            allowed = await apiClient<AllowedPlayerResponse[]>(`/games/${run.id}/allowed-players`, {
+              devUserRole: 'host',
+            })
+          } else {
+            throw err
+          }
+        }
         setAllowedPlayers(allowed)
       }
 
@@ -357,6 +368,10 @@ export default function HostDashboardPage() {
           method: 'POST',
           devUserRole: 'host',
           body: JSON.stringify({ gameRunId: run.id, prompt: automationForm.themePrompt.trim(), tone: 'fun' }),
+        })
+        await apiClient(`/themes/${theme.id}/approve`, {
+          method: 'POST',
+          devUserRole: 'host',
         })
         await apiClient<GameSettingsResponse>(`/games/${run.id}/theme`, {
           method: 'POST',

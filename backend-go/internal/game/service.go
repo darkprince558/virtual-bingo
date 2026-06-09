@@ -947,11 +947,12 @@ func (s *Service) prepareGameContent(ctx context.Context, gameRunID string, acto
 	}
 
 	output, err := s.aiClient.GenerateGamePrep(ctx, ai.GamePrepInput{
-		GameRunID:   gameRunID,
-		TopicPrompt: run.Name,
-		WordCount:   75,
-		Tone:        "fun",
-		Audience:    "internal workplace team",
+		GameRunID:     gameRunID,
+		TopicPrompt:   run.Name,
+		WordCount:     75,
+		Tone:          "fun",
+		Audience:      "internal workplace team",
+		ExcludedWords: []string{},
 		Settings: map[string]string{
 			"callerStyle": settings.CallerMode,
 			"themeMode":   settings.ThemeMode,
