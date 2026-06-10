@@ -49,8 +49,8 @@ export default function NewTemplatePage() {
         <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }} className="flex items-center gap-2 mb-8">
           {STEPS.map((s, i) => (
             <div key={s} className="flex items-center gap-2">
-              <button onClick={() => setStep(i)} className="flex items-center gap-2 px-3 py-2 rounded-full text-xs font-extrabold transition-all" style={{ background: step === i ? '#FFF4F0' : step > i ? '#D5F5E6' : '#F4F2EF', color: step === i ? '#E8440A' : step > i ? '#116B3F' : '#A8A29E', border: step === i ? '1.5px solid #FFE4D9' : '1.5px solid transparent' }}>
-                {step > i ? <Check className="w-3.5 h-3.5" /> : <span className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black" style={{ background: step === i ? '#FF5A1F' : '#E7E5E4', color: step === i ? '#fff' : '#A8A29E' }}>{i + 1}</span>}
+              <button onClick={() => setStep(i)} className="flex items-center gap-2 px-3 py-2 rounded-full text-xs font-extrabold transition-all" style={{ background: step === i ? '#FFF0F3' : step > i ? '#D5F5E6' : '#F4F2EF', color: step === i ? '#C40026' : step > i ? '#116B3F' : '#A8A29E', border: step === i ? '1.5px solid #FFE4D9' : '1.5px solid transparent' }}>
+                {step > i ? <Check className="w-3.5 h-3.5" /> : <span className="w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-black" style={{ background: step === i ? '#E8002D' : '#E7E5E4', color: step === i ? '#fff' : '#A8A29E' }}>{i + 1}</span>}
                 {s}
               </button>
               {i < STEPS.length - 1 && <div className="w-6 h-px" style={{ background: '#E7E5E4' }} />}
@@ -84,8 +84,8 @@ export default function NewTemplatePage() {
               <div><label style={labelStyle}>Content Generation Mode</label>
                 <div className="space-y-2.5">
                   {['AI Generated', 'Manual', 'Reuse Word Bank'].map(mode => (
-                    <button key={mode} onClick={() => update('contentMode', mode)} className="w-full flex items-center gap-3 px-4 py-3.5 rounded-lg text-left transition-all" style={{ background: form.contentMode === mode ? '#FFF4F0' : '#FAFAF9', border: form.contentMode === mode ? '1.5px solid #FFE4D9' : '1.5px solid #F0EDE8' }}>
-                      <div className="w-9 h-9 rounded-md flex items-center justify-center" style={{ background: form.contentMode === mode ? 'linear-gradient(135deg, #FF7A42, #FF5A1F)' : '#F4F2EF' }}>
+                    <button key={mode} onClick={() => update('contentMode', mode)} className="w-full flex items-center gap-3 px-4 py-3.5 rounded-lg text-left transition-all" style={{ background: form.contentMode === mode ? '#FFF0F3' : '#FAFAF9', border: form.contentMode === mode ? '1.5px solid #FFE4D9' : '1.5px solid #F0EDE8' }}>
+                      <div className="w-9 h-9 rounded-md flex items-center justify-center" style={{ background: form.contentMode === mode ? 'linear-gradient(135deg, #C0003D, #E8002D)' : '#F4F2EF' }}>
                         <Sparkles className="w-4 h-4" style={{ color: form.contentMode === mode ? '#fff' : '#A8A29E' }} />
                       </div>
                       <div><p className="text-sm font-bold" style={{ color: '#1C1917' }}>{mode}</p><p className="text-[10px] font-semibold" style={{ color: '#A8A29E' }}>{mode === 'AI Generated' ? 'AI creates fresh words from a prompt each week' : mode === 'Manual' ? 'You provide the word list manually' : 'Pick from previously saved word banks'}</p></div>
@@ -136,7 +136,7 @@ export default function NewTemplatePage() {
               Previous
             </button>
             {step < STEPS.length - 1 ? (
-              <button onClick={() => setStep(step + 1)} className="px-6 py-3 rounded-lg text-sm font-extrabold" style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)', color: '#fff', boxShadow: '0 4px 16px rgba(255,90,31,0.30)' }}>
+              <button onClick={() => setStep(step + 1)} className="px-6 py-3 rounded-lg text-sm font-extrabold" style={{ background: 'linear-gradient(135deg, #C0003D, #E8002D)', color: '#fff', boxShadow: '0 4px 16px rgba(232,0,45,0.30)' }}>
                 Continue
               </button>
             ) : (

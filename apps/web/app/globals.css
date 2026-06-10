@@ -1,29 +1,31 @@
 @import "tailwindcss";
 
 /* ─────────────────────────────────────────────
-   HEADSPACE-INSPIRED DESIGN TOKENS
-   Warm, rounded, playful-yet-professional
+   CGI BRAND DESIGN TOKENS
+   CGI red-to-purple gradient identity
 ───────────────────────────────────────────── */
 
 @theme {
-  /* Brand palette – warm coral/orange (primary action) */
-  --color-brand-50:  #FFF4F0;
-  --color-brand-100: #FFE4D9;
-  --color-brand-200: #FFC5A8;
-  --color-brand-300: #FFA070;
-  --color-brand-400: #FF7A42;
-  --color-brand-500: #FF5A1F;
-  --color-brand-600: #E8440A;
-  --color-brand-700: #C23208;
-  --color-brand-800: #9A2606;
-  --color-brand-900: #7A1E05;
-  --color-brand-950: #4A1003;
+  /* Brand palette – CGI red (primary action) */
+  --color-brand-50:  #FFF0F3;
+  --color-brand-100: #FFD6DF;
+  --color-brand-200: #FFB0C0;
+  --color-brand-300: #FF7A92;
+  --color-brand-400: #FF3D5E;
+  --color-brand-500: #E8002D;
+  --color-brand-600: #C40026;
+  --color-brand-700: #9C001E;
+  --color-brand-800: #780018;
+  --color-brand-900: #580012;
+  --color-brand-950: #33000A;
 
   /* CGI Brand Palette */
-  --color-cgi-red: #E8002D;
-  --color-cgi-dark: #1A1A2E;
-  --color-cgi-navy: #0D1B2A;
-  --color-cgi-light: #F5F5F5;
+  --color-cgi-red:    #E8002D;
+  --color-cgi-purple: #7B1FA2;
+  --color-cgi-dark:   #1A1A2E;
+  --color-cgi-navy:   #0D1B2A;
+  --color-cgi-light:  #F5F5F5;
+  --gradient-cgi: linear-gradient(135deg, #E8002D 0%, #7B1FA2 100%);
 
   /* Mint – success / confirmed states */
   --color-mint-50:  #EDFAF5;
@@ -127,7 +129,7 @@
 
   /* Smooth focus ring for keyboard users */
   :focus-visible {
-    outline: 3px solid #FF5A1F;
+    outline: 3px solid #E8002D;
     outline-offset: 2px;
     border-radius: 0.5rem;
   }
@@ -146,7 +148,7 @@
   * { scrollbar-width: thin; scrollbar-color: #E7E5E4 transparent; }
 
   /* Selection */
-  ::selection { background: #FFE4D9; color: #C23208; }
+  ::selection { background: #FFD6DF; color: #9C001E; }
 }
 
 /* ─────────────────────────────────────────────
@@ -154,24 +156,24 @@
 ───────────────────────────────────────────── */
 @layer components {
 
-  /* Pill button – primary CTA */
+  /* Pill button – primary CTA (CGI gradient) */
   .btn-primary {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.5rem;
     padding: 0.75rem 2rem;
-    background-color: #FF5A1F;
+    background: linear-gradient(135deg, #E8002D 0%, #7B1FA2 100%);
     color: #fff;
     font-weight: 800;
     font-size: 0.95rem;
     border-radius: 9999px;
     border: none;
     cursor: pointer;
-    transition: background-color 0.2s, transform 0.1s, box-shadow 0.2s;
-    box-shadow: 0 4px 16px rgba(255, 90, 31, 0.30);
+    transition: opacity 0.2s, transform 0.1s, box-shadow 0.2s;
+    box-shadow: 0 4px 16px rgba(232, 0, 45, 0.35);
   }
-  .btn-primary:hover { background-color: #E8440A; box-shadow: 0 6px 20px rgba(255, 90, 31, 0.40); }
+  .btn-primary:hover { opacity: 0.9; box-shadow: 0 6px 20px rgba(232, 0, 45, 0.45); }
   .btn-primary:active { transform: scale(0.97); }
   .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 
@@ -231,8 +233,8 @@
 }
 
 @keyframes pulse-ring {
-  0%   { box-shadow: 0 0 0 0   rgba(255, 90, 31, 0.5); }
-  100% { box-shadow: 0 0 0 18px rgba(255, 90, 31, 0); }
+  0%   { box-shadow: 0 0 0 0   rgba(232, 0, 45, 0.5); }
+  100% { box-shadow: 0 0 0 18px rgba(232, 0, 45, 0); }
 }
 
 @keyframes shimmer {
@@ -257,8 +259,8 @@
 }
 
 @keyframes excitement-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 90, 31, 0.4); }
-  50%      { box-shadow: 0 0 0 12px rgba(255, 90, 31, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(232, 0, 45, 0.4); }
+  50%      { box-shadow: 0 0 0 12px rgba(232, 0, 45, 0); }
 }
 
 @keyframes golden-shimmer {
@@ -285,8 +287,8 @@
 }
 
 @keyframes word-glow {
-  0%, 100% { text-shadow: 0 0 20px rgba(255, 90, 31, 0.15); }
-  50%      { text-shadow: 0 0 40px rgba(255, 90, 31, 0.30); }
+  0%, 100% { text-shadow: 0 0 20px rgba(232, 0, 45, 0.15); }
+  50%      { text-shadow: 0 0 40px rgba(232, 0, 45, 0.30); }
 }
 
 .animate-float         { animation: float-up-down 3.5s ease-in-out infinite; }

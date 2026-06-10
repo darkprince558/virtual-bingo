@@ -39,7 +39,7 @@ export default function TemplatesPage() {
             <h1 className="text-3xl sm:text-4xl font-black tracking-tight mb-2" style={{ color: '#1C1917' }}>Recurring Games</h1>
             <p className="text-sm font-semibold" style={{ color: '#78716C' }}>Set up a template once and the system creates weekly runs automatically.</p>
           </div>
-          <Link href="/host/templates/new" className="flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-extrabold shrink-0" style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)', color: '#FFFFFF', boxShadow: '0 4px 16px rgba(255,90,31,0.30)' }}>
+          <Link href="/host/templates/new" className="flex items-center justify-center gap-2 px-5 py-3 rounded-lg text-sm font-extrabold shrink-0" style={{ background: 'linear-gradient(135deg, #C0003D, #E8002D)', color: '#FFFFFF', boxShadow: '0 4px 16px rgba(232,0,45,0.30)' }}>
             <Plus className="w-4 h-4" /> New Template
           </Link>
         </motion.div>
@@ -49,7 +49,7 @@ export default function TemplatesPage() {
             <motion.div key={tmpl.id} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 + i * 0.06 }} className="rounded-xl p-5 sm:p-6" style={{ background: '#FFFFFF', border: '1.5px solid #F0EDE8', boxShadow: '0 2px 16px rgba(0,0,0,0.04)', opacity: tmpl.isActive ? 1 : 0.7 }}>
               <div className="flex flex-col sm:flex-row sm:items-start gap-4">
                 <div className="flex items-start gap-4 flex-1 min-w-0">
-                  <div className="w-12 h-12 rounded-lg flex items-center justify-center shrink-0 text-xl font-black" style={{ background: tmpl.isActive ? 'linear-gradient(135deg, #FF7A42, #FF5A1F)' : '#E7E5E4', color: tmpl.isActive ? '#FFFFFF' : '#A8A29E', boxShadow: tmpl.isActive ? '0 4px 12px rgba(255,90,31,0.25)' : 'none' }}>
+                  <div className="w-12 h-12 rounded-lg flex items-center justify-center shrink-0 text-xl font-black" style={{ background: tmpl.isActive ? 'linear-gradient(135deg, #C0003D, #E8002D)' : '#E7E5E4', color: tmpl.isActive ? '#FFFFFF' : '#A8A29E', boxShadow: tmpl.isActive ? '0 4px 12px rgba(232,0,45,0.25)' : 'none' }}>
                     {tmpl.name.charAt(0)}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -252,7 +252,7 @@ export default function TemplatesPage() {
                 <button onClick={() => setEditingTemplateId(null)} className="flex-1 py-3 rounded-lg text-sm font-bold text-[#78716C] bg-white border-[1.5px] border-[#E7E5E4] hover:bg-gray-50 transition-colors">
                   Cancel
                 </button>
-                <button onClick={saveEdit} className="flex-1 py-3 rounded-lg text-sm font-bold text-white flex items-center justify-center gap-2 transition-all hover:scale-[1.02]" style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)', boxShadow: '0 4px 12px rgba(255,90,31,0.25)' }}>
+                <button onClick={saveEdit} className="flex-1 py-3 rounded-lg text-sm font-bold text-white flex items-center justify-center gap-2 transition-all hover:scale-[1.02]" style={{ background: 'linear-gradient(135deg, #C0003D, #E8002D)', boxShadow: '0 4px 12px rgba(232,0,45,0.25)' }}>
                   <Save className="w-4 h-4" /> Save Changes
                 </button>
               </div>

@@ -44,9 +44,9 @@ export function CurrentCallDisplay({ word, aiMessage, callNumber, audioUrl }: Cu
     <div
       className="w-full rounded-xl overflow-hidden relative"
       style={{
-        background: 'linear-gradient(135deg, #FFF4F0 0%, #FFFFFF 40%, #F5F2FF 100%)',
+        background: 'linear-gradient(135deg, #FFF0F3 0%, #FFFFFF 40%, #F5F2FF 100%)',
         border: '2px solid #FFE4D9',
-        boxShadow: '0 4px 24px rgba(255, 90, 31, 0.10)',
+        boxShadow: '0 4px 24px rgba(232, 0, 45, 0.10)',
       }}
     >
       {/* Decorative shapes */}
@@ -56,27 +56,27 @@ export function CurrentCallDisplay({ word, aiMessage, callNumber, audioUrl }: Cu
       />
       <div
         className="absolute bottom-0 left-0 w-32 h-32 rounded-full pointer-events-none"
-        style={{ background: 'radial-gradient(circle, rgba(255,90,31,0.06) 0%, transparent 70%)', transform: 'translate(-30%, 40%)' }}
+        style={{ background: 'radial-gradient(circle, rgba(232,0,45,0.06) 0%, transparent 70%)', transform: 'translate(-30%, 40%)' }}
       />
 
       {/* Header label */}
       <div className="relative px-5 pt-5 pb-0 flex items-center gap-2">
         <motion.div
           className="w-2.5 h-2.5 rounded-full"
-          style={{ background: '#FF5A1F' }}
+          style={{ background: '#E8002D' }}
           animate={{ scale: [1, 1.3, 1], opacity: [1, 0.7, 1] }}
           transition={{ duration: 1.5, repeat: Infinity, ease: 'easeInOut' }}
         />
         <span
           className="text-xs font-extrabold uppercase tracking-widest"
-          style={{ color: '#FF5A1F', letterSpacing: '0.18em' }}
+          style={{ color: '#E8002D', letterSpacing: '0.18em' }}
         >
           Current Word
         </span>
         {callNumber && (
           <span
             className="ml-auto text-[10px] font-black px-2.5 py-1 rounded-full"
-            style={{ background: '#FFE4D9', color: '#E8440A' }}
+            style={{ background: '#FFE4D9', color: '#C40026' }}
           >
             #{callNumber}
           </span>
@@ -88,9 +88,9 @@ export function CurrentCallDisplay({ word, aiMessage, callNumber, audioUrl }: Cu
           aria-label="Replay caller audio"
           title="Replay caller audio"
           className="ml-auto w-7 h-7 rounded-md flex items-center justify-center transition-all"
-          style={{ background: '#FFF4F0' }}
+          style={{ background: '#FFF0F3' }}
         >
-          <Volume2 className="w-3.5 h-3.5" style={{ color: '#FFC5A8' }} />
+          <Volume2 className="w-3.5 h-3.5" style={{ color: '#FFB0C0' }} />
         </button>
       </div>
 
@@ -112,7 +112,7 @@ export function CurrentCallDisplay({ word, aiMessage, callNumber, audioUrl }: Cu
                 animate={{ opacity: [0.3, 0.6, 0.3] }}
                 transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
                 style={{
-                  background: 'radial-gradient(ellipse, rgba(255, 90, 31, 0.12) 0%, transparent 70%)',
+                  background: 'radial-gradient(ellipse, rgba(232, 0, 45, 0.12) 0%, transparent 70%)',
                   transform: 'scale(2)',
                 }}
               />

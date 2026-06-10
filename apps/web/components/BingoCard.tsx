@@ -12,7 +12,7 @@ interface BingoCardProps {
 }
 
 const BINGO_LETTERS = ['B', 'I', 'N', 'G', 'O']
-const LETTER_COLORS = ['#FF5A1F', '#7C5CFC', '#22AA6A', '#FBBF24', '#F43F5E']
+const LETTER_COLORS = ['#E8002D', '#7C5CFC', '#22AA6A', '#FBBF24', '#F43F5E']
 
 export function BingoCard({ cells, onCellClick, disabled, currentWord }: BingoCardProps) {
   const markedCount = cells.filter(c => c.isMarked).length
@@ -27,7 +27,7 @@ export function BingoCard({ cells, onCellClick, disabled, currentWord }: BingoCa
         style={{
           background: '#FFFFFF',
           border: '2px solid #F0EDE8',
-          boxShadow: '0 8px 40px rgba(255, 90, 31, 0.08), 0 2px 12px rgba(0,0,0,0.04)',
+          boxShadow: '0 8px 40px rgba(232, 0, 45, 0.08), 0 2px 12px rgba(0,0,0,0.04)',
         }}
       >
         {/* Decorative corner blobs */}
@@ -37,7 +37,7 @@ export function BingoCard({ cells, onCellClick, disabled, currentWord }: BingoCa
         />
         <div
           className="absolute bottom-0 left-0 w-28 h-28 rounded-full pointer-events-none"
-          style={{ background: 'radial-gradient(circle, rgba(255,90,31,0.06) 0%, transparent 70%)', transform: 'translate(-30%, 30%)' }}
+          style={{ background: 'radial-gradient(circle, rgba(232,0,45,0.06) 0%, transparent 70%)', transform: 'translate(-30%, 30%)' }}
         />
 
         {/* B I N G O header letters with individual colors */}
@@ -91,7 +91,7 @@ export function BingoCard({ cells, onCellClick, disabled, currentWord }: BingoCa
             <span className="text-[10px] font-extrabold uppercase tracking-widest" style={{ color: '#A8A29E' }}>
               Progress
             </span>
-            <span className="text-[10px] font-black" style={{ color: markedCount >= 5 ? '#FF5A1F' : '#A8A29E' }}>
+            <span className="text-[10px] font-black" style={{ color: markedCount >= 5 ? '#E8002D' : '#A8A29E' }}>
               {markedCount} / {totalCells}
             </span>
           </div>
@@ -106,11 +106,11 @@ export function BingoCard({ cells, onCellClick, disabled, currentWord }: BingoCa
               transition={{ duration: 0.5, ease: 'easeOut' }}
               style={{
                 background: progress > 60
-                  ? 'linear-gradient(90deg, #FF7A42, #FF5A1F, #E8440A)'
+                  ? 'linear-gradient(90deg, #C0003D, #E8002D, #C40026)'
                   : progress > 30
-                    ? 'linear-gradient(90deg, #FFC5A8, #FF7A42)'
-                    : 'linear-gradient(90deg, #FFE4D9, #FFC5A8)',
-                boxShadow: progress > 60 ? '0 0 12px rgba(255, 90, 31, 0.4)' : 'none',
+                    ? 'linear-gradient(90deg, #FFB0C0, #C0003D)'
+                    : 'linear-gradient(90deg, #FFE4D9, #FFB0C0)',
+                boxShadow: progress > 60 ? '0 0 12px rgba(232, 0, 45, 0.4)' : 'none',
               }}
             />
           </div>

@@ -149,7 +149,7 @@ function ContentReviewContent() {
             <Sparkles className="w-8 h-8 mx-auto mb-3" style={{ color: '#F59E0B' }} />
             <h1 className="text-2xl font-black mb-2" style={{ color: '#1C1917' }}>No game selected</h1>
             <p className="text-sm font-semibold mb-5" style={{ color: '#78716C' }}>Choose a real game from the host dashboard to prepare AI words.</p>
-            <Link href="/host" className="inline-flex px-5 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FFF4F0', color: '#E8440A' }}>Open Host Dashboard</Link>
+            <Link href="/host" className="inline-flex px-5 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FFF0F3', color: '#C40026' }}>Open Host Dashboard</Link>
           </div>
         </div>
       </DashboardShell>
@@ -185,7 +185,7 @@ function ContentReviewContent() {
             <AlertTriangle className="w-8 h-8 mx-auto mb-3" style={{ color: '#F59E0B' }} />
             <h2 className="text-xl font-black mb-2" style={{ color: '#1C1917' }}>No generated content yet</h2>
             <p className="text-sm font-semibold mb-5" style={{ color: '#78716C' }}>Use the Go backend pipeline to generate a reviewable topic, summary, and word list.</p>
-            <button onClick={prepareContent} disabled={isWorking} className="inline-flex items-center gap-2 px-5 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FF5A1F', color: '#FFFFFF', opacity: isWorking ? 0.7 : 1 }}>
+            <button onClick={prepareContent} disabled={isWorking} className="inline-flex items-center gap-2 px-5 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#E8002D', color: '#FFFFFF', opacity: isWorking ? 0.7 : 1 }}>
               <Sparkles className="w-4 h-4" /> {isWorking ? 'Generating...' : 'Generate AI Content'}
             </button>
           </div>
@@ -225,7 +225,7 @@ function ContentReviewContent() {
                   <button onClick={prepareContent} disabled={isWorking || isLocked} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#F5F2FF', color: '#6440E8', opacity: isWorking || isLocked ? 0.55 : 1 }}>
                     <RefreshCw className="w-4 h-4" /> Regenerate Draft
                   </button>
-                  <button onClick={saveEdits} disabled={isWorking || isLocked || words.length < 24} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FFF4F0', color: '#C23208', opacity: isWorking || isLocked || words.length < 24 ? 0.55 : 1 }}>
+                  <button onClick={saveEdits} disabled={isWorking || isLocked || words.length < 24} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FFF0F3', color: '#C23208', opacity: isWorking || isLocked || words.length < 24 ? 0.55 : 1 }}>
                     <Edit3 className="w-4 h-4" /> Save Edits
                   </button>
                   <button onClick={lockContent} disabled={isWorking || isLocked || words.length < 24} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#EDFAF5', color: '#116B3F', opacity: isWorking || isLocked || words.length < 24 ? 0.55 : 1 }}>
@@ -234,7 +234,7 @@ function ContentReviewContent() {
                   <button onClick={generateAssets} disabled={isWorking || !isLocked} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FEF3C7', color: '#B45309', opacity: isWorking || !isLocked ? 0.55 : 1 }}>
                     <Radio className="w-4 h-4" /> Generate Caller Assets
                   </button>
-                  <button onClick={openLobby} disabled={isWorking || !isLocked} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FF5A1F', color: '#FFFFFF', opacity: isWorking || !isLocked ? 0.55 : 1 }}>
+                  <button onClick={openLobby} disabled={isWorking || !isLocked} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#E8002D', color: '#FFFFFF', opacity: isWorking || !isLocked ? 0.55 : 1 }}>
                     <CheckCircle2 className="w-4 h-4" /> Open Lobby
                   </button>
                 </div>

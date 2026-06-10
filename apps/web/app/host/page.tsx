@@ -31,7 +31,7 @@ import {
 const RUN_STATUS_STYLES: Record<string, { bg: string; color: string; dot: string }> = {
   'Scheduled':           { bg: '#EDE5FF', color: '#6440E8', dot: '#7C5CFC' },
   'Content Generating':  { bg: '#FEF3C7', color: '#B45309', dot: '#F59E0B' },
-  'Content Review':      { bg: '#FFE4D9', color: '#C23208', dot: '#FF5A1F' },
+  'Content Review':      { bg: '#FFE4D9', color: '#C23208', dot: '#E8002D' },
   'Invites Sent':        { bg: '#D5F5E6', color: '#116B3F', dot: '#22AA6A' },
   'Lobby Open':          { bg: '#D5F5E6', color: '#116B3F', dot: '#22AA6A' },
   'Live':                { bg: '#D5F5E6', color: '#116B3F', dot: '#22AA6A' },
@@ -458,7 +458,7 @@ export default function HostDashboardPage() {
             onClick={handleQuickStart}
             disabled={isCreating}
             className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-extrabold"
-            style={{ background: '#FF5A1F', color: '#FFFFFF', opacity: isCreating ? 0.7 : 1 }}
+            style={{ background: '#E8002D', color: '#FFFFFF', opacity: isCreating ? 0.7 : 1 }}
           >
             <Zap className="w-4 h-4" /> {isCreating ? 'Starting...' : 'Quick Start'}
           </button>
@@ -479,7 +479,7 @@ export default function HostDashboardPage() {
           className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5"
         >
           {[
-            { icon: CalendarClock, label: 'Active Templates', value: activeTemplates.length, color: '#FF5A1F', bg: '#FFF4F0' },
+            { icon: CalendarClock, label: 'Active Templates', value: activeTemplates.length, color: '#E8002D', bg: '#FFF0F3' },
             { icon: Radio, label: 'Live Now', value: liveRuns.length, color: '#22AA6A', bg: '#EDFAF5' },
             { icon: Clock, label: 'Upcoming', value: upcomingRuns.length, color: '#7C5CFC', bg: '#F5F2FF' },
             { icon: Sparkles, label: 'Needs Review', value: setupRun ? 1 : 0, color: '#F59E0B', bg: '#FFFBEB' },
@@ -521,7 +521,7 @@ export default function HostDashboardPage() {
             >
               <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
-                  <div className="mb-2 inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider" style={{ background: '#FFF4F0', color: '#C23208' }}>
+                  <div className="mb-2 inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider" style={{ background: '#FFF0F3', color: '#C23208' }}>
                     <Sparkles className="h-3.5 w-3.5" /> Automated prep
                   </div>
                   <h2 className="text-xl font-black tracking-tight" style={{ color: '#1C1917' }}>
@@ -572,9 +572,9 @@ export default function HostDashboardPage() {
                     circleColor = '#116B3F'
                     borderColor = '#22AA6A'
                   } else if (isCurrent) {
-                    circleBg = '#FFF4F0'
-                    circleColor = '#FF5A1F'
-                    borderColor = '#FF5A1F'
+                    circleBg = '#FFF0F3'
+                    circleColor = '#E8002D'
+                    borderColor = '#E8002D'
                   }
 
                   return (
@@ -604,7 +604,7 @@ export default function HostDashboardPage() {
                 {/* Section 01: Core Details & Theme */}
                 <div className="p-4 rounded-xl" style={{ border: '1.5px solid #F0EDE8', background: '#FFFFFF' }}>
                   <div className="flex items-center gap-2 mb-3">
-                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white" style={{ background: '#FF5A1F' }}>1</span>
+                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white" style={{ background: '#E8002D' }}>1</span>
                     <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: '#1C1917' }}>Game Identity & AI Theme</h3>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -637,7 +637,7 @@ export default function HostDashboardPage() {
                 <div className="p-4 rounded-xl" style={{ border: '1.5px solid #F0EDE8', background: '#FFFFFF' }}>
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
-                      <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white" style={{ background: '#FF5A1F' }}>2</span>
+                      <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white" style={{ background: '#E8002D' }}>2</span>
                       <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: '#1C1917' }}>Participant Roster</h3>
                     </div>
                     <div className="flex bg-[#F0EDE8] rounded-lg p-0.5">
@@ -766,7 +766,7 @@ export default function HostDashboardPage() {
                 {/* Section 03: Launch Strategy */}
                 <div className="p-4 rounded-xl" style={{ border: '1.5px solid #F0EDE8', background: '#FFFFFF' }}>
                   <div className="flex items-center gap-2 mb-3">
-                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white" style={{ background: '#FF5A1F' }}>3</span>
+                    <span className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black text-white" style={{ background: '#E8002D' }}>3</span>
                     <h3 className="text-xs font-black uppercase tracking-wider" style={{ color: '#1C1917' }}>Lobby Launch Strategy</h3>
                   </div>
                   
@@ -787,7 +787,7 @@ export default function HostDashboardPage() {
                           Let AI generate a customized list of 30 vocabulary words. You will be taken to a review board to inspect and edit them before starting the game.
                         </p>
                       </div>
-                      <span className="mt-3 text-[9px] font-extrabold uppercase tracking-wide px-2 py-0.5 rounded-full self-start" style={{ background: '#FFF4F0', color: '#C23208' }}>
+                      <span className="mt-3 text-[9px] font-extrabold uppercase tracking-wide px-2 py-0.5 rounded-full self-start" style={{ background: '#FFF0F3', color: '#C23208' }}>
                         Recommended
                       </span>
                     </div>
@@ -821,7 +821,7 @@ export default function HostDashboardPage() {
                       disabled={isRunningAutomation}
                       className="inline-flex w-full items-center justify-center gap-2 rounded-xl py-3.5 text-sm font-extrabold shadow-md hover:shadow-lg transition-all"
                       style={{
-                        background: isRunningAutomation ? '#E7E5E4' : 'linear-gradient(135deg, #FF7A42, #FF5A1F)',
+                        background: isRunningAutomation ? '#E7E5E4' : 'linear-gradient(135deg, #C0003D, #E8002D)',
                         color: '#FFFFFF',
                         opacity: isRunningAutomation ? 0.72 : 1,
                       }}
@@ -832,7 +832,7 @@ export default function HostDashboardPage() {
 
                     {/* Progress details indicator */}
                     {isRunningAutomation && automationProgress && (
-                      <div className="mt-3 p-3 rounded-lg flex items-center gap-2.5 justify-center animate-pulse" style={{ background: '#FFF4F0', border: '1px solid #FFE4D9' }}>
+                      <div className="mt-3 p-3 rounded-lg flex items-center gap-2.5 justify-center animate-pulse" style={{ background: '#FFF0F3', border: '1px solid #FFE4D9' }}>
                         <div className="w-2 h-2 rounded-full bg-orange-500" />
                         <span className="text-xs font-bold" style={{ color: '#C23208' }}>
                           AI Engine: {automationProgress}...
@@ -939,7 +939,7 @@ export default function HostDashboardPage() {
                           />
                         </FieldHelp>
                         <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-                          <button onClick={handleSaveSetup} disabled={isSavingSetup} className="rounded-lg py-2.5 text-xs font-extrabold sm:col-span-1" style={{ background: '#FFF4F0', color: '#C23208', opacity: isSavingSetup ? 0.65 : 1 }}>
+                          <button onClick={handleSaveSetup} disabled={isSavingSetup} className="rounded-lg py-2.5 text-xs font-extrabold sm:col-span-1" style={{ background: '#FFF0F3', color: '#C23208', opacity: isSavingSetup ? 0.65 : 1 }}>
                             {isSavingSetup ? 'Saving...' : 'Save settings'}
                           </button>
                           <button onClick={handleAddPlayers} disabled={isSavingSetup || !newPlayersText.trim()} className="rounded-lg py-2.5 text-xs font-extrabold" style={{ background: '#EDFAF5', color: '#116B3F', opacity: isSavingSetup || !newPlayersText.trim() ? 0.55 : 1 }}>
@@ -1074,7 +1074,7 @@ export default function HostDashboardPage() {
                 <Link
                   href="/host/templates"
                   className="text-xs font-bold flex items-center gap-1 transition-all"
-                  style={{ color: '#FF5A1F' }}
+                  style={{ color: '#E8002D' }}
                 >
                   View All <ChevronRight className="w-3.5 h-3.5" />
                 </Link>
@@ -1092,7 +1092,7 @@ export default function HostDashboardPage() {
                     <div
                       className="w-9 h-9 rounded-md flex items-center justify-center shrink-0 text-xs font-black"
                       style={{
-                        background: tmpl.isActive ? 'linear-gradient(135deg, #FF7A42, #FF5A1F)' : '#E7E5E4',
+                        background: tmpl.isActive ? 'linear-gradient(135deg, #C0003D, #E8002D)' : '#E7E5E4',
                         color: tmpl.isActive ? '#FFFFFF' : '#A8A29E',
                       }}
                     >

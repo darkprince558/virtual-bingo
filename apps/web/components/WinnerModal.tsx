@@ -38,12 +38,12 @@ const PLACEMENT_CONFIG = {
     ring: '#D6D3D1',
   },
   3: {
-    emoji: <Medal size={48} color="#FF7A42" />,
+    emoji: <Medal size={48} color="#C0003D" />,
     label: '3rd Place',
-    gradient: 'linear-gradient(135deg, #FFA070 0%, #FF7A42 100%)',
-    glow: 'rgba(255, 90, 31, 0.25)',
+    gradient: 'linear-gradient(135deg, #FFA070 0%, #C0003D 100%)',
+    glow: 'rgba(232, 0, 45, 0.25)',
     accent: '#C23208',
-    bg: '#FFF4F0',
+    bg: '#FFF0F3',
     chipBg: '#FFE4D9',
     chipText: '#C23208',
     ring: '#FFA070',
@@ -219,7 +219,7 @@ export function WinnerModal({ isOpen, winner, placement, pattern, onClose }: Win
                         initial={{ background: '#F0EDE8' }}
                         animate={{
                           background: i >= 4 && i <= 6
-                            ? ['#FF5A1F', '#FF7A42', '#FF5A1F']
+                            ? ['#E8002D', '#C0003D', '#E8002D']
                             : '#F0EDE8',
                         }}
                         transition={i >= 4 && i <= 6 ? { duration: 1.5, repeat: Infinity } : {}}
@@ -234,9 +234,9 @@ export function WinnerModal({ isOpen, winner, placement, pattern, onClose }: Win
                   onClick={onClose}
                   className="w-full py-4 rounded-lg font-extrabold text-base transition-all"
                   style={{
-                    background: 'linear-gradient(135deg, #FF7A42 0%, #FF5A1F 100%)',
+                    background: 'linear-gradient(135deg, #C0003D 0%, #E8002D 100%)',
                     color: '#FFFFFF',
-                    boxShadow: '0 6px 20px rgba(255, 90, 31, 0.35)',
+                    boxShadow: '0 6px 20px rgba(232, 0, 45, 0.35)',
                   }}
                 >
                   Continue Game

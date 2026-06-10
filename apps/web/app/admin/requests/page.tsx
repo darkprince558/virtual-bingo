@@ -51,7 +51,7 @@ export default function HostRequestsPage() {
                 <motion.div key={req.id} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + i * 0.05 }} className="rounded-lg p-4 sm:p-5" style={{ background: '#FAFAF9', border: '1.5px solid #F0EDE8' }}>
                   <div className="flex flex-col sm:flex-row sm:items-start gap-4">
                     <div className="flex items-start gap-3 flex-1 min-w-0">
-                      <div className="w-10 h-10 rounded-md flex items-center justify-center shrink-0 text-sm font-black" style={{ background: 'linear-gradient(135deg, #FFA070, #FF5A1F)', color: '#FFFFFF' }}>
+                      <div className="w-10 h-10 rounded-md flex items-center justify-center shrink-0 text-sm font-black" style={{ background: 'linear-gradient(135deg, #FFA070, #E8002D)', color: '#FFFFFF' }}>
                         {req.requesterName.split(' ').map(n => n[0]).join('').slice(0, 2)}
                       </div>
                       <div className="flex-1 min-w-0">

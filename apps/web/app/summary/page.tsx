@@ -14,7 +14,7 @@ import { Home, Download, Share2, Clock, Users, Hash, Trophy, ChevronLeft, PartyP
 const PODIUM_CONFIG = {
   1: { emoji: <Trophy size={32} color="#F59E0B" />, bg: 'linear-gradient(135deg, #FBBF24, #F59E0B)', color: '#FFFFFF', glow: 'rgba(245,158,11,0.30)', height: 96, label: '1st Place' },
   2: { emoji: <Medal size={28} color="#A8A29E" />, bg: 'linear-gradient(135deg, #D6D3D1, #A8A29E)', color: '#FFFFFF', glow: 'rgba(168,162,158,0.20)', height: 72, label: '2nd Place' },
-  3: { emoji: <Medal size={28} color="#FF7A42" />, bg: 'linear-gradient(135deg, #FFA070, #FF7A42)', color: '#FFFFFF', glow: 'rgba(255,90,31,0.20)', height: 56, label: '3rd Place' },
+  3: { emoji: <Medal size={28} color="#C0003D" />, bg: 'linear-gradient(135deg, #FFA070, #C0003D)', color: '#FFFFFF', glow: 'rgba(232,0,45,0.20)', height: 56, label: '3rd Place' },
 }
 
 function getInitials(name: string) {
@@ -79,7 +79,7 @@ function SummaryContent() {
             <Trophy className="w-9 h-9 mx-auto mb-3" style={{ color: '#F59E0B' }} />
             <h1 className="text-2xl font-black mb-2" style={{ color: '#1C1917' }}>No summary selected</h1>
             <p className="text-sm font-semibold mb-5" style={{ color: '#78716C' }}>Open a completed or live run from the host dashboard to view real results.</p>
-            <Link href="/host" className="inline-flex items-center gap-2 px-5 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FFF4F0', color: '#E8440A' }}>
+            <Link href="/host" className="inline-flex items-center gap-2 px-5 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FFF0F3', color: '#C40026' }}>
               <ChevronLeft className="w-4 h-4" /> Host Dashboard
             </Link>
           </div>
@@ -105,7 +105,7 @@ function SummaryContent() {
 
   const stats = [
     { icon: Users, label: 'Total Players', value: summary.playerCount, color: '#7C5CFC' },
-    { icon: Hash, label: 'Words Called', value: summary.calledWordCount, color: '#FF5A1F' },
+    { icon: Hash, label: 'Words Called', value: summary.calledWordCount, color: '#E8002D' },
     { icon: Clock, label: 'Claims', value: summary.claims.length, color: '#22AA6A' },
   ]
 
@@ -117,7 +117,7 @@ function SummaryContent() {
         <div className="max-w-3xl mx-auto">
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.5 }} className="text-center mb-10">
             <div className="flex justify-center mb-4 text-orange-500"><PartyPopper size={48} /></div>
-            <p className="text-xs font-extrabold uppercase tracking-[0.2em] mb-2" style={{ color: '#FF5A1F' }}>
+            <p className="text-xs font-extrabold uppercase tracking-[0.2em] mb-2" style={{ color: '#E8002D' }}>
               {displayBackendValue(summary.status)}
             </p>
             <h1 className="text-4xl sm:text-5xl font-black tracking-tight mb-3" style={{ color: '#1C1917' }}>
@@ -208,7 +208,7 @@ function SummaryContent() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-3">
-            <Link href="/host" id="returnHomeBtn" className="flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-extrabold text-base transition-all" style={{ background: 'linear-gradient(135deg, #FF7A42, #FF5A1F)', color: '#FFFFFF', boxShadow: '0 6px 20px rgba(255,90,31,0.30)' }}>
+            <Link href="/host" id="returnHomeBtn" className="flex-1 flex items-center justify-center gap-2 py-4 rounded-xl font-extrabold text-base transition-all" style={{ background: 'linear-gradient(135deg, #C0003D, #E8002D)', color: '#FFFFFF', boxShadow: '0 6px 20px rgba(232,0,45,0.30)' }}>
               <Home className="w-5 h-5" /> Host Dashboard
             </Link>
             <button id="exportResultsBtn" className="flex items-center justify-center gap-2 px-6 py-4 rounded-xl font-bold text-sm transition-all" style={{ background: '#F4F2EF', color: '#78716C', border: '1.5px solid #E7E5E4' }} title="Export coming with backend integration">

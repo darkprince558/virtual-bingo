@@ -205,7 +205,7 @@ function HostLiveContent() {
             <p className="text-xs font-extrabold uppercase tracking-[0.2em] mb-2" style={{ color: '#A8A29E' }}>Live Game</p>
             <h1 className="text-2xl font-black mb-2" style={{ color: '#1C1917' }}>No game selected</h1>
             <p className="text-sm font-semibold mb-5" style={{ color: '#78716C' }}>Open a live run from the host dashboard, or quick start a new session.</p>
-            <Link href="/host" className="inline-flex items-center justify-center px-5 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FFF4F0', color: '#E8440A', border: '1.5px solid #FFE4D9' }}>
+            <Link href="/host" className="inline-flex items-center justify-center px-5 py-3 rounded-lg text-sm font-extrabold" style={{ background: '#FFF0F3', color: '#C40026', border: '1.5px solid #FFE4D9' }}>
               Back to Host Dashboard
             </Link>
           </div>
@@ -341,7 +341,7 @@ function HostLiveContent() {
                   style={{ color: '#78716C' }}
                 >
                   <span className="inline-flex items-center gap-2"><SlidersHorizontal className="h-4 w-4" /> Manual override</span>
-                  <span style={{ color: manualControlsOpen ? '#E8440A' : '#A8A29E' }}>{manualControlsOpen ? 'Open' : 'Closed'}</span>
+                  <span style={{ color: manualControlsOpen ? '#C40026' : '#A8A29E' }}>{manualControlsOpen ? 'Open' : 'Closed'}</span>
                 </button>
                 {manualControlsOpen && (
                   <div className="border-t p-3" style={{ borderColor: '#F0EDE8' }}>
@@ -420,8 +420,8 @@ function HostLiveContent() {
               onClick={() => setMobileTab(tab)}
               className="flex-1 flex flex-col items-center justify-center py-2.5 rounded-2xl text-[11px] font-extrabold uppercase tracking-wide transition-transform active:scale-95"
               style={{
-                color: mobileTab === tab ? '#E8440A' : '#78716C',
-                background: mobileTab === tab ? '#FFF4F0' : '#FFFFFF',
+                color: mobileTab === tab ? '#C40026' : '#78716C',
+                background: mobileTab === tab ? '#FFF0F3' : '#FFFFFF',
                 border: mobileTab === tab ? '1.5px solid #FFE4D9' : '1.5px solid #F0EDE8',
                 boxShadow: mobileTab === tab ? 'none' : '0 4px 12px rgba(0,0,0,0.05)'
               }}

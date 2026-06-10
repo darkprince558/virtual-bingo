@@ -12,8 +12,8 @@ const nunito = Nunito({
 });
 
 export const metadata: Metadata = {
-  title: 'Virtual Bingo | Team Game',
-  description: 'A live, interactive corporate bingo game. Centralized cards, real-time word calls, claim review, and winner tracking.',
+  title: 'CGI Virtual Bingo | Team Game',
+  description: 'CGI\'s live, interactive corporate bingo game. Centralized cards, real-time word calls, claim review, and winner tracking.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
